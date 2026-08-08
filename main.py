@@ -32,6 +32,99 @@ from rich.rule import Rule
 console = Console()
 memory = Memory()
 
+# Phase 6 item 8 (CLI/GUI consistency pass): identical to webapp/app.js's TEAM_ICON/
+# TEAM_LABEL — same icons, same names, so "which team handled this" reads the same way
+# whether you're looking at the terminal or the browser. Kept as a literal copy rather than
+# a shared import specifically because these are presentation constants for two completely
+# different rendering targets (Rich console markup vs. DOM text) — a shared source would
+# need its own translation layer for no real benefit over just keeping both in sync by eye.
+TEAM_ICON = {
+    "personal_assistant": "🗂", "network": "📡", "it": "🖥️", "cybersecurity": "🛡️", "hacking": "🎯",
+}
+TEAM_LABEL = {
+    "personal_assistant": "Personal Assistant", "network": "Network", "it": "IT",
+    "cybersecurity": "Cybersecurity", "hacking": "Hacking",
+}
+
+
+def _build_jarvis_brain():
+    """Phase 6 item 8: the CLI's standalone entry point onto the SAME JarvisBrain +
+    team_router engine the multi-device server uses — session_manager.py's own docstring
+    already documented this as the intent ("usable by both the CLI ... and the multi-device
+    server"), but main.py never actually adopted it and kept a separate, older flat-tool
+    ReAct loop instead. That meant running `python main.py chat` locally never got Phase 4's
+    team routing or Phase 5's skill usage at all, silently diverging from what the same
+    request does through the web GUI. approval_fn=None here isn't a gap — Coordinator's own
+    default _request_approval() already implements exactly this CLI's local
+    Confirm.ask()/3-second-countdown flow when no external approval_fn is given, so passing
+    None reuses that unchanged rather than duplicating it in a second place."""
+    from session_manager import JarvisBrain
+    return JarvisBrain(approval_fn=None, memory=memory)
+
+
+def _print_team_status(event: str, data):
+    """Rich-console equivalent of webapp/app.js's tool_status handler — same three
+    team_router.py events (team_routing/team_active/team_handoff_gate), same phrasing,
+    printed as dim status lines rather than DOM notes. Also handles "tools_starting",
+    already emitted by JarvisBrain.process_turn_stream itself (team-routed or not)."""
+    if event == "team_routing":
+        icons = "".join(TEAM_ICON.get(k, "🤖") for k in data["teams"])
+        names = " → ".join(TEAM_LABEL.get(k, k) for k in data["teams"])
+        how = "asked directly" if data.get("explicit") else "routed"
+        console.print(f"[dim]{icons} {names} ({how})[/dim]")
+    elif event == "team_active":
+        team = data.get("team")
+        console.print(f"[dim]{TEAM_ICON.get(team, '🤖')} {TEAM_LABEL.get(team, team)} team working…[/dim]")
+    elif event == "team_handoff_gate":
+        verdict = "approved" if data.get("approved") else "not approved"
+        console.print(f"[dim yellow]⚠ Cybersecurity → Hacking handoff {verdict}[/dim yellow]")
+    elif event == "tools_starting":
+        tools = ", ".join(data or [])
+        if tools:
+            console.print(f"[dim](running {tools}…)[/dim]")
+
+
+def run_team_turn(brain, chat_history: list, quiet: bool = False, on_final=None) -> dict:
+    """Shared by chat mode and the one-shot natural-language path: runs one turn through
+    team_router.route_and_run() (falls back to personal_assistant if classification is
+    inconclusive — team_router's own default, unchanged) and streams the response to the
+    console as it arrives, same UX the remote `--server` path and the web GUI already have,
+    rather than local mode being the one place still waiting for a whole response to land
+    at once. `quiet=True` (used by --json) suppresses all console output — the caller
+    prints the structured result itself."""
+    import team_router
+
+    streaming = False
+
+    def on_status(event, data):
+        if not quiet:
+            _print_team_status(event, data)
+
+    result = {"response": "", "tools_ran": [], "denied": [], "teams_involved": []}
+    for kind, payload in team_router.route_and_run(brain, chat_history, None, on_status=on_status):
+        if kind == "chunk":
+            if quiet:
+                continue
+            if not streaming:
+                console.print()
+                console.print("[bold cyan]Jarvis:[/bold cyan] ", end="")
+                streaming = True
+            console.print(payload, end="")
+        elif kind == "done":
+            result = payload
+    if not quiet:
+        if streaming:
+            console.print()
+        elif result.get("response"):
+            console.print(f"[bold cyan]Jarvis:[/bold cyan] {result['response']}")
+        for d in result.get("denied", []):
+            console.print(f"[dim](refused: {d['tool']} needs '{d['required']}' capability)[/dim]")
+        console.print()
+    if on_final and result.get("response"):
+        on_final(result["response"])
+    return result
+
+
 def print_banner():
     banner = r"""
       _  __      ______   _____ 
@@ -59,37 +152,23 @@ def display_menu():
     table.add_row("", "5", "Security posture check")
     table.add_row("[dim]── AI Chat ──[/dim]", "", "")
     table.add_row("", "6", "[bold cyan]Chat with Jarvis[/bold cyan]")
+    table.add_row("[dim]── Teams & Skills ──[/dim]", "", "")
+    table.add_row("", "7", "View teams (mirrors the web GUI's Teams panel)")
+    table.add_row("", "8", "View skill review queue (mirrors the web GUI's Skills panel)")
     table.add_row("[dim]── Memory ──[/dim]", "", "")
-    table.add_row("", "7", "View recent Action Logs")
+    table.add_row("", "9", "View recent Action Logs")
     table.add_row("[dim]── System ──[/dim]", "", "")
-    table.add_row("", "8", "Exit")
+    table.add_row("", "10", "Exit")
 
     console.print(Panel(table, title="[bold]Welcome, Devin.[/bold]", border_style="magenta"))
 
-def _build_brain():
-    """Load LLM with full persona + memory context. Returns (brain, system_prompt)."""
-    from llm import get_llm, build_system_prompt, extract_remember_facts
-    brain = get_llm()
-    semantic_ctx = memory.get_semantic_context()
-    recent_eps = memory.get_recent_episodes(n=5)
-    sys_prompt = build_system_prompt(semantic_ctx, recent_eps)
-    return brain, sys_prompt, extract_remember_facts
-
-def _persist_remember_tags(response_text: str, extract_fn):
-    """Extract any [REMEMBER: ...] tags from Jarvis's response and persist them."""
-    facts = extract_fn(response_text)
-    for fact in facts:
-        memory.append_fact(fact)
-    # Strip tags from display text
-    import re
-    return re.sub(r'\[REMEMBER:\s*.+?\]', '', response_text).strip()
-
-def run_chat_mode(c: Coordinator, voice_layer=None):
-    """Interactive conversational chatbot loop with ReAct + persona + memory."""
-    try:
-        brain, sys_prompt, extract_fn = _build_brain()
-    except Exception as e:
-        console.print(f"[bold red]Failed to load AI Brain:[/bold red] {e}")
+def run_chat_mode(voice_layer=None):
+    """Interactive conversational chatbot loop — Phase 6 item 8: now the same JarvisBrain +
+    team_router engine the web GUI and `--server` thin-client use (see _build_jarvis_brain's
+    docstring for why this changed), not a separate flat-tool ReAct loop."""
+    brain = _build_jarvis_brain()
+    if not brain.is_available():
+        console.print(f"[bold red]Failed to load AI Brain:[/bold red] {brain._llm_error}")
         console.print("Make sure your [bold].env[/bold] file is set up with your API key.")
         return
 
@@ -159,52 +238,8 @@ def run_chat_mode(c: Coordinator, voice_layer=None):
 
         chat_history.append({"role": "user", "content": user_input})
 
-        # --- ReAct Loop ---
-        max_iterations = 3
-        iteration = 0
-
-        while iteration < max_iterations:
-            iteration += 1
-
-            with console.status("[bold cyan]🧠 Thinking...[/bold cyan]", spinner="dots"):
-                try:
-                    response_data = brain.chat(chat_history, sys_prompt)
-                except Exception as e:
-                    console.print(f"[bold red]AI Brain Error:[/bold red] {e}")
-                    break
-
-            jarvis_response = response_data.get("response", "")
-            tools_to_run = response_data.get("tools", [])
-
-            # Persist any [REMEMBER] facts and clean display text
-            if jarvis_response:
-                clean_response = _persist_remember_tags(jarvis_response, extract_fn)
-            else:
-                clean_response = ""
-
-            if clean_response:
-                console.print()
-                console.print(f"[bold cyan]Jarvis:[/bold cyan] {clean_response}")
-                if voice_active:
-                    voice_layer.speak(clean_response)
-
-            if tools_to_run:
-                console.print()
-                console.print(Rule("[dim]Running Tools[/dim]", style="dim"))
-                tool_results = c.run_tools(tools_to_run)
-                console.print(Rule(style="dim"))
-
-                chat_history.append({"role": "assistant", "content": clean_response or "[Running tools...]"})
-                chat_history.append({
-                    "role": "user",
-                    "content": f"[SYSTEM] Tool execution complete. Results:\n{tool_results}\n\nProvide your final response."
-                })
-            else:
-                if clean_response:
-                    chat_history.append({"role": "assistant", "content": clean_response})
-                break
-
-        console.print()
+        speak_fn = voice_layer.speak if voice_active else None
+        run_team_turn(brain, chat_history, on_final=speak_fn)
 
 async def _remote_chat_session(server_url: str, voice_layer=None):
     """Thin-client chat over a WebSocket to server.py — same UX as local chat mode, but every
@@ -358,11 +393,46 @@ def run_remote_chat_mode(server_url: str, voice_layer=None):
     asyncio.run(_remote_chat_session(server_url, voice_layer))
 
 
+def _json_print(obj):
+    print(json.dumps(obj, indent=2, default=str))
+
+
+class _quiet_coordinator:
+    """Phase 6 item 8: --json needs to mean *only* JSON on stdout, pipeable to `jq` or
+    anything else — but coordinator.py's Reason/Act/Observe steps print directly via their
+    own module-level Rich Console unconditionally, there's no quiet flag on Coordinator
+    itself to pass through. Rather than thread a quiet param through Coordinator/
+    JarvisBrain/team_router (every layer between here and there, for one CLI-only concern),
+    redirect that one Console's output file to os.devnull for the duration of the call —
+    the narrowest fix that doesn't touch behavior anything else depends on."""
+    def __enter__(self):
+        import coordinator as _coord
+        self._orig_file = _coord.console.file
+        # Real bug hit writing this: os.devnull opened with the platform default codepage
+        # (cp1252 on Windows) still round-trips through real encode() calls even though the
+        # bytes go nowhere — Rich's Console writes real text through self.file regardless of
+        # where that file points, so an emoji in a Reason/Act/Observe line raised
+        # UnicodeEncodeError before ever reaching /dev/null. Explicit UTF-8 (same
+        # errors="replace" convention this file and server.py already use for stdout/stderr)
+        # fixes it.
+        self._devnull = open(os.devnull, "w", encoding="utf-8", errors="replace")
+        _coord.console.file = self._devnull
+        return self
+
+    def __exit__(self, *exc):
+        import coordinator as _coord
+        _coord.console.file = self._orig_file
+        self._devnull.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description="Jarvis Automation CLI")
     parser.add_argument("command", nargs="?", help="Direct command or natural language")
     parser.add_argument("--voice", action="store_true", help="Enable voice mode (requires voice deps)")
     parser.add_argument("--server", metavar="HOST:PORT", help="Connect to a Jarvis server as a thin client instead of running locally")
+    parser.add_argument("--json", action="store_true",
+                         help="Machine-readable output for a direct command (emails/health/logs/security) "
+                              "or a one-shot natural-language request — no Rich formatting, no chat/menu modes.")
     args = parser.parse_args()
 
     # Optional voice layer — loads silently, no-ops if disabled
@@ -385,43 +455,52 @@ def main():
     c = Coordinator()
 
     if args.command:
-        if args.command == 'emails':
-            c.run_tools([{"tool": "read_recent_emails"}])
-        elif args.command == 'health':
-            c.run_tools([{"tool": "check_system_health"}])
-        elif args.command == 'logs':
-            c.run_tools([{"tool": "scan_local_logs"}])
+        if args.json and args.command in ("chat",):
+            _json_print({"error": f"--json isn't meaningful for '{args.command}' (interactive mode) — use it with "
+                                   "emails/health/logs/security, or a one-shot natural-language request."})
+            sys.exit(2)
+
+        if args.command in ('emails', 'health', 'logs'):
+            tool_name = {'emails': 'read_recent_emails', 'health': 'check_system_health', 'logs': 'scan_local_logs'}[args.command]
+            if args.json:
+                with _quiet_coordinator():
+                    result = c.run_single_tool(tool_name)
+                _json_print({"tool": tool_name, "result": result})
+            else:
+                c.run_tools([{"tool": tool_name}])
         elif args.command == 'security':
-            posture = c.run_single_tool("get_security_posture")
-            if isinstance(posture, dict):
-                from security_tools import render_posture_dashboard
-                console.print(render_posture_dashboard(posture))
+            if args.json:
+                with _quiet_coordinator():
+                    posture = c.run_single_tool("get_security_posture")
+                _json_print({"tool": "get_security_posture", "result": posture})
+            else:
+                posture = c.run_single_tool("get_security_posture")
+                if isinstance(posture, dict):
+                    from security_tools import render_posture_dashboard
+                    console.print(render_posture_dashboard(posture))
         elif args.command == 'chat':
-            run_chat_mode(c, voice_layer)
+            run_chat_mode(voice_layer)
         else:
-            # Natural language — one-shot with full persona
-            console.print(Panel(f"[bold cyan]Task:[/bold cyan] {args.command}", title="🤖 Jarvis", border_style="cyan"))
-            try:
-                brain, sys_prompt, extract_fn = _build_brain()
-                with console.status("[bold cyan]🧠 Thinking...[/bold cyan]", spinner="dots"):
-                    response_data = brain.chat([{"role": "user", "content": args.command}], sys_prompt)
-                jarvis_response = _persist_remember_tags(response_data.get("response", ""), extract_fn)
-                tools_to_run = response_data.get("tools", [])
-                if jarvis_response:
-                    console.print(f"[bold cyan]Jarvis:[/bold cyan] {jarvis_response}")
-                if tools_to_run:
-                    results = c.run_tools(tools_to_run)
-                    with console.status("[bold cyan]🧠 Summarizing...[/bold cyan]", spinner="dots"):
-                        final = brain.chat([
-                            {"role": "user", "content": args.command},
-                            {"role": "assistant", "content": jarvis_response or ""},
-                            {"role": "user", "content": f"[SYSTEM] Tool results:\n{results}\n\nProvide your final response."}
-                        ], sys_prompt)
-                    final_text = _persist_remember_tags(final.get("response", ""), extract_fn)
-                    if final_text:
-                        console.print(f"[bold cyan]Jarvis:[/bold cyan] {final_text}")
-            except Exception as e:
-                console.print(f"[bold red]AI Brain Error:[/bold red] {e}")
+            # Natural language — one-shot, now through the same team-routed engine chat
+            # mode and the web GUI use (Phase 6 item 8), not a separate hand-rolled
+            # two-call chat()/tools/chat() sequence.
+            if not args.json:
+                console.print(Panel(f"[bold cyan]Task:[/bold cyan] {args.command}", title="🤖 Jarvis", border_style="cyan"))
+            brain = _build_jarvis_brain()
+            if not brain.is_available():
+                msg = f"AI Brain unavailable: {brain._llm_error}"
+                if args.json:
+                    _json_print({"error": msg})
+                else:
+                    console.print(f"[bold red]AI Brain Error:[/bold red] {brain._llm_error}")
+                sys.exit(1)
+            chat_history = [{"role": "user", "content": args.command}]
+            if args.json:
+                with _quiet_coordinator():
+                    result = run_team_turn(brain, chat_history, quiet=True)
+                _json_print(result)
+            else:
+                run_team_turn(brain, chat_history, quiet=False)
         return
 
     # Interactive Menu Mode
@@ -429,7 +508,7 @@ def main():
         print_banner()
         display_menu()
 
-        choice = Prompt.ask("\nSelect an option", choices=["1","2","3","4","5","6","7","8"], default="6")
+        choice = Prompt.ask("\nSelect an option", choices=[str(n) for n in range(1, 11)], default="6")
 
         if choice == '1':
             console.print(Panel("[bold cyan]Goal:[/bold cyan] Check recent emails", title="🤖 Jarvis", border_style="cyan"))
@@ -455,8 +534,53 @@ def main():
                 console.print(render_posture_dashboard(posture))
             console.print(Panel("[bold green]Done[/bold green]", border_style="green"))
         elif choice == '6':
-            run_chat_mode(c, voice_layer)
+            run_chat_mode(voice_layer)
         elif choice == '7':
+            # Phase 6 item 8: mirrors the web GUI's Teams panel — same fields (tool count,
+            # scope, address phrase), same data source (teams.TEAMS), just a Rich table
+            # instead of a modal.
+            from teams import TEAMS
+            table = Table(title="Teams", border_style="cyan")
+            table.add_column("Team", style="bold cyan")
+            table.add_column("Tools", justify="center", style="magenta", width=6)
+            table.add_column("Scope", style="white", max_width=50)
+            table.add_column("Address with", style="dim")
+            for key, team in TEAMS.items():
+                # A terminal table column has real width limits a browser modal doesn't —
+                # first sentence only, full scope_prompt is what the GUI's own Teams panel
+                # already shows for anyone who wants the complete text.
+                first_sentence = team.scope_prompt.split(". ", 1)[0].strip().rstrip(".") + "."
+                table.add_row(
+                    f"{TEAM_ICON.get(key, '🤖')} {team.display_name}",
+                    str(len(team.tool_names())), first_sentence,
+                    f'"ask the {team.aliases[0]}..."' if team.aliases else "",
+                )
+            console.print(table)
+            Prompt.ask("\nPress Enter to continue", default="")
+        elif choice == '8':
+            # Phase 6 item 8: mirrors the web GUI's Skills panel, grouped the same way
+            # (proposed first — that's the actual review queue).
+            import skills
+            table = Table(title="Skill Review Queue", border_style="cyan")
+            table.add_column("Status", style="bold", width=10)
+            table.add_column("Name", style="cyan")
+            table.add_column("Team", style="magenta", width=18)
+            table.add_column("Tier", justify="center", width=8)
+            table.add_column("Record", justify="center", width=10)
+            status_style = {"proposed": "yellow", "active": "green", "flagged": "red", "disabled": "dim", "rejected": "dim"}
+            all_skills = sorted(skills.list_skills(), key=lambda s: (s.status != "proposed", s.status))
+            if not all_skills:
+                console.print("[dim]No skills learned yet.[/dim]")
+            for s in all_skills:
+                style = status_style.get(s.status, "white")
+                table.add_row(
+                    f"[{style}]{s.status.upper()}[/{style}]", s.name,
+                    f"{TEAM_ICON.get(s.team, '🤖')} {TEAM_LABEL.get(s.team, s.team or '—')}",
+                    s.tier, f"{s.success_count}/{s.success_count + s.fail_count}",
+                )
+            console.print(table)
+            Prompt.ask("\nPress Enter to continue", default="")
+        elif choice == '9':
             try:
                 with open("data/episodic_memory.jsonl", "r") as f:
                     lines = f.readlines()
@@ -474,7 +598,7 @@ def main():
             except Exception:
                 console.print("[bold red]No memory found.[/bold red]")
             Prompt.ask("\nPress Enter to continue", default="")
-        elif choice == '8':
+        elif choice == '10':
             console.print("[bold green]Shutting down.[/bold green]")
             sys.exit(0)
 
