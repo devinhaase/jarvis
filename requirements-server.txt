@@ -1,0 +1,7 @@
+# Optional multi-device server — install only if you want to run server.py / main.py --server.
+#
+#   python -m pip install -r requirements-server.txt
+
+fastapi
+uvicorn
+websockets

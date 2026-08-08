@@ -1,0 +1,17 @@
+# Optional voice layer for Jarvis — install only if you want --voice mode.
+# Everything here runs fully local by default: wake word (openWakeWord), STT (Vosk),
+# TTS (pyttsx3/SAPI5). No API key required for any of it.
+#
+#   python -m pip install -r requirements-voice.txt
+#
+# Then download the local STT model (one-time, ~40MB):
+#   curl -o vosk-model.zip https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
+#   unzip vosk-model.zip -d data/voice_models/
+#   mv "data/voice_models/vosk-model-small-en-us-0.15" "data/voice_models/vosk-model-small-en-us"
+# The wake-word model (hey_jarvis) downloads itself automatically on first run.
+
+pyaudio
+pyttsx3
+SpeechRecognition
+vosk
+openwakeword

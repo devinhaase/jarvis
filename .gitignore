@@ -1,0 +1,34 @@
+# Secrets — never commit these
+.env
+credentials.json
+token.json
+devices.json
+
+# Runtime data — conversation history, memory, generated payloads, voice models, backups
+data/
+backups/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+venv/
+env/
+.venv/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Local tool config, not project content
+.claude/
+
+# Stray artifacts from running test_harness.py (draft_local_note writes these fresh each run)
+/meeting.md
+/email_summary.md

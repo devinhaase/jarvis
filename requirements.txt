@@ -1,0 +1,10 @@
+python-dotenv
+openai
+anthropic
+google-generativeai
+requests
+rich
+google-api-python-client
+google-auth
+google-auth-oauthlib
+google-auth-httplib2

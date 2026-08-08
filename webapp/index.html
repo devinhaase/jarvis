@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jarvis</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="app">
+
+  <button id="sidebarToggle" class="icon-btn sidebar-toggle" title="Toggle conversations">☰</button>
+
+  <aside id="sidebar">
+    <div class="sidebar-header">
+      <span class="brand">JARVIS</span>
+      <button id="newConvBtn" class="icon-btn" title="New conversation">+</button>
+    </div>
+
+    <div class="search-box">
+      <input id="searchInput" type="text" placeholder="Search conversations…" autocomplete="off">
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-header">
+        <span>PROJECTS</span>
+        <button id="newProjectBtn" class="icon-btn small" title="New project">+</button>
+      </div>
+      <div id="projectList" class="project-list"></div>
+    </div>
+
+    <div class="sidebar-section-header conv-section-header">
+      <span id="convSectionLabel">ALL CONVERSATIONS</span>
+      <button id="clearProjectFilterBtn" class="text-btn hidden" title="Show all conversations">clear</button>
+    </div>
+    <div id="convList" class="conv-list"></div>
+
+    <div class="sidebar-footer">
+      <button id="toolsBtn" class="text-btn">🛠 Tools</button>
+      <span id="connStatus" class="conn-status offline">connecting…</span>
+    </div>
+  </aside>
+
+  <div id="sidebarOverlay"></div>
+
+  <main id="main">
+    <header id="chatHeader">
+      <h1 id="convTitle" contenteditable="true" spellcheck="false">Jarvis</h1>
+      <span id="projectBadge" class="project-badge hidden"></span>
+      <span id="listeningIndicator" class="listening-indicator hidden">
+        <span class="dot"></span> listening…
+      </span>
+    </header>
+
+    <div id="messages" class="messages"></div>
+
+    <div id="attachmentBar" class="attachment-bar hidden"></div>
+
+    <form id="composer" class="composer">
+      <button type="button" id="attachBtn" class="icon-btn composer-btn" title="Attach files">📎</button>
+      <button type="button" id="attachFolderBtn" class="icon-btn composer-btn" title="Attach a folder">📁</button>
+      <input type="file" id="fileInput" multiple hidden>
+      <input type="file" id="folderInput" webkitdirectory directory multiple hidden>
+      <textarea id="composerInput" placeholder="Message Jarvis…" rows="1" autocomplete="off"></textarea>
+      <button type="button" id="micBtn" class="icon-btn composer-btn" title="Voice input">🎤</button>
+      <button id="sendBtn" type="submit" class="send-btn" title="Send">➤</button>
+    </form>
+  </main>
+
+  <div id="toolsModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <span>Tools</span>
+        <button id="toolsCloseBtn" class="icon-btn">✕</button>
+      </div>
+      <div id="toolsBody" class="modal-body"></div>
+    </div>
+  </div>
+
+  <div id="projectModal" class="modal-overlay hidden">
+    <div class="modal modal-small">
+      <div class="modal-header">
+        <span>New project</span>
+        <button id="projectModalCloseBtn" class="icon-btn">✕</button>
+      </div>
+      <div class="modal-body">
+        <input id="projectNameInput" type="text" placeholder="Project name" autocomplete="off">
+        <button id="projectCreateBtn" class="primary-btn">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="moveModal" class="modal-overlay hidden">
+    <div class="modal modal-small">
+      <div class="modal-header">
+        <span>Move to project</span>
+        <button id="moveModalCloseBtn" class="icon-btn">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="moveModalList" class="move-list"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+<script src="/app.js"></script>
+</body>
+</html>
