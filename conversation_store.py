@@ -91,6 +91,23 @@ CREATE TABLE IF NOT EXISTS files (
 
 CREATE INDEX IF NOT EXISTS idx_files_conv ON files(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_files_project ON files(project_id);
+
+-- Phase 4: shared incident/task board every team can read from and write to, so a
+-- Network-team finding can trigger a Cybersecurity-team response without going through
+-- Devin each time. One SQLite file, same as everything else here — no new datastore.
+CREATE TABLE IF NOT EXISTS team_incidents (
+    id TEXT PRIMARY KEY,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    created_by_team TEXT NOT NULL,
+    target_team TEXT,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'open',
+    severity TEXT NOT NULL DEFAULT 'info',
+    source_data TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_incidents_target ON team_incidents(target_team, status);
 """
 
 
@@ -573,6 +590,73 @@ class ConversationStore:
             cid: [x / counts[cid] for x in vec_sum]
             for cid, vec_sum in sums.items() if counts[cid] > 0
         }
+
+    # ------------------------------------------------------------ team board (Phase 4) --
+    def create_incident(self, created_by_team: str, title: str, description: str = "",
+                         target_team: str = None, severity: str = "info", source_data: dict = None) -> str:
+        """Any team can call this — a Network-team finding lands here for Cybersecurity to
+        pick up without a round trip through Devin. `target_team=None` means broadcast
+        (any team's poll picks it up); severity is free text ("info"/"warning"/"critical"
+        are the conventions teams.py's scope prompts use, not DB-enforced)."""
+        incident_id = str(uuid.uuid4())
+        now = time.time()
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO team_incidents (id, created_at, updated_at, created_by_team, "
+                "target_team, title, description, status, severity, source_data) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (incident_id, now, now, created_by_team, target_team, title, description,
+                 "open", severity, json.dumps(source_data or {}))
+            )
+            self._conn.commit()
+        return incident_id
+
+    def list_incidents(self, target_team: str = None, status: str = None, limit: int = 100) -> list:
+        """`target_team=None` returns every incident regardless of who it's addressed to
+        (a dashboard view); pass a team key to get just that team's queue (what a team's
+        own poll loop checks)."""
+        query = "SELECT * FROM team_incidents WHERE 1=1"
+        params = []
+        if target_team is not None:
+            query += " AND target_team=?"
+            params.append(target_team)
+        if status is not None:
+            query += " AND status=?"
+            params.append(status)
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        with self._lock:
+            rows = self._conn.execute(query, params).fetchall()
+        results = []
+        for row in rows:
+            d = dict(row)
+            try:
+                d["source_data"] = json.loads(d["source_data"])
+            except (json.JSONDecodeError, TypeError):
+                d["source_data"] = {}
+            results.append(d)
+        return results
+
+    def get_incident(self, incident_id: str):
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM team_incidents WHERE id=?", (incident_id,)).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        try:
+            d["source_data"] = json.loads(d["source_data"])
+        except (json.JSONDecodeError, TypeError):
+            d["source_data"] = {}
+        return d
+
+    def update_incident_status(self, incident_id: str, status: str) -> bool:
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE team_incidents SET status=?, updated_at=? WHERE id=?",
+                (status, time.time(), incident_id)
+            )
+            self._conn.commit()
+        return cur.rowcount > 0
 
     # ---------------------------------------------------------------- migration --
     def _migrate_legacy_sessions(self):

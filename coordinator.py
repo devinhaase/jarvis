@@ -106,10 +106,16 @@ class Coordinator:
                     return False
         return True
 
-    def run_tools(self, plan: list) -> str:
+    def run_tools(self, plan: list, tool_subset: set = None) -> str:
         """
         Execute a list of tool steps.
         Returns a formatted string of all results to feed back to the LLM.
+
+        `tool_subset` (Phase 4): if given, any tool_name not in it is treated exactly like
+        an unknown tool — refused, not executed. This is the real enforcement point for a
+        team's scope; llm.py hiding other tools from the prompt is just the first layer
+        (a model can still hallucinate a call to something it wasn't shown), same
+        defense-in-depth pattern _check_offense_authorization already uses below.
         """
         results_summary = ""
 
@@ -120,6 +126,11 @@ class Coordinator:
             tool = ALL_TOOLS.get(tool_name)
             if not tool:
                 msg = f"Error: Tool '{tool_name}' not found."
+                console.print(f"[bold red]{msg}[/bold red]")
+                results_summary += f"{msg}\n"
+                break
+            if tool_subset is not None and tool_name not in tool_subset:
+                msg = f"Error: '{tool_name}' is outside this team's scope for this turn — not executed."
                 console.print(f"[bold red]{msg}[/bold red]")
                 results_summary += f"{msg}\n"
                 break

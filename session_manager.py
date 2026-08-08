@@ -99,7 +99,8 @@ class JarvisBrain:
     def is_available(self) -> bool:
         return self._brain is not None
 
-    def build_prompt(self, conversation_id: str = None) -> str:
+    def build_prompt(self, conversation_id: str = None, tool_subset: set = None,
+                      team_context: str = "") -> str:
         from llm import build_system_prompt
         semantic_ctx = self.memory.get_semantic_context()
         recent_eps = self.memory.get_recent_episodes(n=5)
@@ -107,10 +108,11 @@ class JarvisBrain:
         if conversation_id:
             from file_ingest import build_context_block
             files_ctx = build_context_block(self._store.get_context_files(conversation_id))
-        return build_system_prompt(semantic_ctx, recent_eps, files_ctx)
+        return build_system_prompt(semantic_ctx, recent_eps, files_ctx, tool_subset, team_context)
 
     def process_turn(self, chat_history: list, device_capabilities: list = None,
-                      max_iterations: int = 3, on_tool_step=None, conversation_id: str = None) -> dict:
+                      max_iterations: int = 3, on_tool_step=None, conversation_id: str = None,
+                      tool_subset: set = None, team_context: str = "") -> dict:
         """
         Run one full ReAct turn: LLM -> optional tool execution -> LLM again if tools ran.
         Mutates `chat_history` in place (appends assistant/tool messages) and returns it as
@@ -124,13 +126,17 @@ class JarvisBrain:
         `on_tool_step(tool_name, tier_name)`, if given, fires before each allowed tool runs —
         used by the server to notify a client mid-turn.
 
+        `tool_subset`/`team_context` (Phase 4): restricts this turn to a team's tools — see
+        team_router.py. None/"" (the default) is the original, unrestricted single-loop
+        behavior, unchanged for any caller that doesn't pass them.
+
         Returns {"response": str, "tools_ran": [...], "denied": [...]}.
         """
         if self._brain is None:
             msg = f"AI Brain unavailable: {self._llm_error}"
             return {"response": msg, "tools_ran": [], "denied": []}
 
-        sys_prompt = self.build_prompt(conversation_id)
+        sys_prompt = self.build_prompt(conversation_id, tool_subset, team_context)
         tools_ran = []
         denied = []
         final_response = ""
@@ -157,7 +163,7 @@ class JarvisBrain:
                     for step in allowed:
                         on_tool_step(step.get("tool"), self._tier_name(step.get("tool")))
 
-                tool_results = self.coordinator.run_tools(allowed) if allowed else ""
+                tool_results = self.coordinator.run_tools(allowed, tool_subset) if allowed else ""
                 if blocked:
                     blocked_msg = "\n".join(
                         f"{b['tool']}: refused — this session's device didn't declare the "
@@ -181,7 +187,8 @@ class JarvisBrain:
         return {"response": final_response, "tools_ran": tools_ran, "denied": denied}
 
     def process_turn_stream(self, chat_history: list, device_capabilities: list = None,
-                             max_iterations: int = 3, on_status=None, conversation_id: str = None):
+                             max_iterations: int = 3, on_status=None, conversation_id: str = None,
+                             tool_subset: set = None, team_context: str = ""):
         """
         Generator version of process_turn() for real-time UIs (the web GUI, the voice
         companion's live transcript). Same ReAct loop, same chat_history mutation, same
@@ -197,6 +204,9 @@ class JarvisBrain:
         `on_status(event, data)`, if given, fires for out-of-band events a UI might want
         to react to immediately rather than waiting for the next chunk — currently just
         "tools_starting" with the list of tool names about to run.
+
+        `tool_subset`/`team_context` (Phase 4): see process_turn()'s docstring — same
+        pass-through, same "None/'' means unrestricted, unchanged" default.
         """
         from llm import stream_and_filter_tags
 
@@ -206,7 +216,7 @@ class JarvisBrain:
             yield ("done", {"response": msg, "tools_ran": [], "denied": []})
             return
 
-        sys_prompt = self.build_prompt(conversation_id)
+        sys_prompt = self.build_prompt(conversation_id, tool_subset, team_context)
         tools_ran = []
         denied = []
         final_response = ""
@@ -262,7 +272,7 @@ class JarvisBrain:
                 if on_status:
                     on_status("tools_starting", [s.get("tool") for s in allowed])
 
-                tool_results = self.coordinator.run_tools(allowed) if allowed else ""
+                tool_results = self.coordinator.run_tools(allowed, tool_subset) if allowed else ""
                 if blocked:
                     blocked_msg = "\n".join(
                         f"{b['tool']}: refused — this session's device didn't declare the "

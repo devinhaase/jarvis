@@ -8,7 +8,7 @@ class Tier(Enum):
     TIER_4 = 4  # Confirmation required
 
 class Tool:
-    def __init__(self, name, description, tier, func, role=None):
+    def __init__(self, name, description, tier, func, role=None, team=None):
         self.name = name
         self.description = description
         self.tier = tier
@@ -19,6 +19,13 @@ class Tool:
         # time, on top of whatever that tool already checks itself. defense/practice are
         # informational tags for now (docs, future routing), not enforcement points.
         self.role = role
+        # team: "personal_assistant" | "network" | "it" | "cybersecurity" | "hacking" | None
+        # (Phase 4 team taxonomy — orthogonal to `role`: role is a security posture tag,
+        # team is which functional group owns this capability). None means coordinator-level
+        # — always reachable regardless of which team is routed to, currently just the
+        # kill switch and self-knowledge tools (see teams.py's module docstring for why
+        # those specifically stay outside any one team's scope).
+        self.team = team
 
     def execute(self, *args, **kwargs):
         return self.func(*args, **kwargs)
@@ -103,9 +110,14 @@ def forced_error_tool():
     raise Exception("Simulated connection timeout to log server")
 
 # Register tools
+# Phase 4: `team=` tags every tool with which of the 5 subagent teams owns it (see
+# teams.py). Orthogonal to `role` — role is a security-posture tag (offense/defense/
+# practice), team is a functional-ownership tag (personal_assistant/network/it/
+# cybersecurity/hacking). Tools with no team stay coordinator-level, reachable regardless
+# of which team is routed to — see teams.py's docstring for exactly which tools and why.
 assistant_tools = {
-    "read_recent_emails": Tool("read_recent_emails", "Fetch unread emails via Gmail API", Tier.TIER_1, read_recent_emails),
-    "draft_local_note": Tool("draft_local_note", "Draft a markdown note", Tier.TIER_2, mock_draft_note)
+    "read_recent_emails": Tool("read_recent_emails", "Fetch unread emails via Gmail API", Tier.TIER_1, read_recent_emails, team="personal_assistant"),
+    "draft_local_note": Tool("draft_local_note", "Draft a markdown note", Tier.TIER_2, mock_draft_note, team="personal_assistant")
 }
 
 try:
@@ -115,7 +127,7 @@ try:
         "web_search",
         "General-purpose web search (not security-scoped) — DuckDuckGo by default, "
         "no API key required; uses Brave Search if BRAVE_SEARCH_API_KEY is set",
-        Tier.TIER_1, _web_search
+        Tier.TIER_1, _web_search, team="personal_assistant"
     )
 except Exception:
     pass  # Web search unavailable — Jarvis continues without it
@@ -123,32 +135,32 @@ except Exception:
 try:
     from task_manager import add_task, list_tasks, complete_task, delete_task
 
-    assistant_tools["add_task"] = Tool("add_task", "Add a task/reminder (title, optional details, optional due_date as YYYY-MM-DD)", Tier.TIER_2, add_task)
-    assistant_tools["list_tasks"] = Tool("list_tasks", "List tasks, soonest-due first — undone tasks by default, pass include_completed=true for everything", Tier.TIER_1, list_tasks)
-    assistant_tools["complete_task"] = Tool("complete_task", "Mark a task complete by its id", Tier.TIER_2, complete_task)
-    assistant_tools["delete_task"] = Tool("delete_task", "Delete a task by its id", Tier.TIER_2, delete_task)
+    assistant_tools["add_task"] = Tool("add_task", "Add a task/reminder (title, optional details, optional due_date as YYYY-MM-DD)", Tier.TIER_2, add_task, team="personal_assistant")
+    assistant_tools["list_tasks"] = Tool("list_tasks", "List tasks, soonest-due first — undone tasks by default, pass include_completed=true for everything", Tier.TIER_1, list_tasks, team="personal_assistant")
+    assistant_tools["complete_task"] = Tool("complete_task", "Mark a task complete by its id", Tier.TIER_2, complete_task, team="personal_assistant")
+    assistant_tools["delete_task"] = Tool("delete_task", "Delete a task by its id", Tier.TIER_2, delete_task, team="personal_assistant")
 except Exception:
     pass  # Task manager unavailable — Jarvis continues without it
-
-ops_tools = {
-    "check_system_health": Tool("check_system_health", "Check system CPU usage", Tier.TIER_1, check_system_health),
-    "scan_local_logs": Tool("scan_local_logs", "Scan Windows event logs for errors", Tier.TIER_1, scan_local_logs),
-    "run_local_script": Tool("run_local_script", "Run an arbitrary local script or command", Tier.TIER_3, run_local_script),
-    "error_tool": Tool("error_tool", "Forces an error for testing", Tier.TIER_1, forced_error_tool)
-}
 
 try:
     from conversation_store import semantic_search_conversations
 
-    ops_tools["semantic_search_conversations"] = Tool(
+    assistant_tools["semantic_search_conversations"] = Tool(
         "semantic_search_conversations",
         "Search past conversations by meaning, not just keyword (complements the GUI's "
         "keyword search) — finds conceptually related conversations even if the wording "
         "differs entirely. Degrades gracefully if the local embedding model isn't available.",
-        Tier.TIER_1, semantic_search_conversations
+        Tier.TIER_1, semantic_search_conversations, team="personal_assistant"
     )
 except Exception:
     pass  # Semantic search unavailable — Jarvis continues without it
+
+ops_tools = {
+    "check_system_health": Tool("check_system_health", "Check system CPU usage", Tier.TIER_1, check_system_health, team="it"),
+    "scan_local_logs": Tool("scan_local_logs", "Scan Windows event logs for errors", Tier.TIER_1, scan_local_logs, team="it"),
+    "run_local_script": Tool("run_local_script", "Run an arbitrary local script or command", Tier.TIER_3, run_local_script, team="it"),
+    "error_tool": Tool("error_tool", "Forces an error for testing", Tier.TIER_1, forced_error_tool)  # no team — test-only utility, not a real capability
+}
 
 try:
     from usage_tracker import get_usage_stats
@@ -157,7 +169,7 @@ try:
         "get_usage_stats",
         "Approximate LLM token usage and cost over the last N days (default 30), broken "
         "down by provider — always $0 on Ollama (local), only matters if a paid API is active",
-        Tier.TIER_1, get_usage_stats
+        Tier.TIER_1, get_usage_stats, team="it"
     )
 except Exception:
     pass  # Usage tracking unavailable — Jarvis continues without it
@@ -169,7 +181,7 @@ try:
         "create_backup",
         "Create a local timestamped zip backup of data/ (conversations, memory, authorized "
         "targets) plus .env/devices.json/credentials — never uploaded anywhere. Prunes old backups.",
-        Tier.TIER_2, _create_backup
+        Tier.TIER_2, _create_backup, team="it"
     )
 except Exception:
     pass  # Backup tool unavailable — Jarvis continues without it
@@ -177,16 +189,21 @@ except Exception:
 try:
     from file_tools import read_local_file, list_directory, write_local_file, move_or_rename_path
 
-    ops_tools["read_local_file"] = Tool("read_local_file", "Read a local text file's content (truncated to max_chars)", Tier.TIER_1, read_local_file)
-    ops_tools["list_directory"] = Tool("list_directory", "List a local directory's immediate contents (name, is_dir, size_bytes)", Tier.TIER_1, list_directory)
-    ops_tools["write_local_file"] = Tool("write_local_file", "Write or append to a local text file", Tier.TIER_2, write_local_file)
-    ops_tools["move_or_rename_path"] = Tool("move_or_rename_path", "Move or rename a local file/directory — refuses if the destination already exists", Tier.TIER_3, move_or_rename_path)
+    ops_tools["read_local_file"] = Tool("read_local_file", "Read a local text file's content (truncated to max_chars)", Tier.TIER_1, read_local_file, team="it")
+    ops_tools["list_directory"] = Tool("list_directory", "List a local directory's immediate contents (name, is_dir, size_bytes)", Tier.TIER_1, list_directory, team="it")
+    ops_tools["write_local_file"] = Tool("write_local_file", "Write or append to a local text file", Tier.TIER_2, write_local_file, team="it")
+    ops_tools["move_or_rename_path"] = Tool("move_or_rename_path", "Move or rename a local file/directory — refuses if the destination already exists", Tier.TIER_3, move_or_rename_path, team="it")
 except Exception:
     pass  # File tools unavailable — Jarvis continues without them
 
 try:
     from security_hardening import arm_kill_switch, disarm_kill_switch, kill_switch_status, run_self_audit
 
+    # Kill switch stays coordinator-level (team=None), deliberately not owned by
+    # Cybersecurity: an emergency stop needs to be reachable no matter which team (or no
+    # team) is currently handling a request — see _check_kill_switch in coordinator.py,
+    # which already exempts disarm from its own block for the same "must stay reachable"
+    # reasoning.
     ops_tools["arm_kill_switch"] = Tool(
         "arm_kill_switch",
         "EMERGENCY STOP: immediately refuse every Tier 2+ tool call until disarmed. Takes an "
@@ -205,7 +222,7 @@ try:
         "run_self_audit",
         "Read-only audit of Jarvis's own security hardening: kill switch state, whether "
         "credential files are accidentally tracked in git, registered device count/staleness.",
-        Tier.TIER_1, run_self_audit, role="defense",
+        Tier.TIER_1, run_self_audit, role="defense", team="cybersecurity",
     )
 except Exception:
     pass  # Hardening tools unavailable — Jarvis continues without them
@@ -213,6 +230,7 @@ except Exception:
 try:
     from generate_self_knowledge import get_self_knowledge
 
+    # Also coordinator-level — meta info about Jarvis itself isn't any one team's domain.
     ops_tools["get_self_knowledge"] = Tool(
         "get_self_knowledge",
         "Return a live self-knowledge document about Jarvis itself: full tool inventory by "
@@ -223,6 +241,51 @@ try:
     )
 except Exception:
     pass  # Self-knowledge doc unavailable — Jarvis continues without it
+
+try:
+    from conversation_store import store as _store
+
+    def _create_team_incident(created_by_team, title, description="", target_team=None, severity="info"):
+        return _store.create_incident(created_by_team, title, description, target_team, severity)
+
+    def _list_team_incidents(target_team=None, status=None):
+        return _store.list_incidents(target_team=target_team, status=status)
+
+    # Coordinator-level (team=None): the shared board isn't any one team's domain — every
+    # team can read the queue and file a finding for another team to pick up.
+    ops_tools["create_team_incident"] = Tool(
+        "create_team_incident",
+        "File a finding on the shared team incident board for another team to pick up "
+        "(target_team=null broadcasts to any team's queue). This is how a Network or IT "
+        "finding reaches the Cybersecurity team without going through Devin each time.",
+        Tier.TIER_2, _create_team_incident,
+    )
+    ops_tools["list_team_incidents"] = Tool(
+        "list_team_incidents",
+        "List items on the shared team incident board — optionally filtered by target_team "
+        "and/or status (open/acknowledged/resolved).",
+        Tier.TIER_1, _list_team_incidents,
+    )
+except Exception:
+    pass  # Team board unavailable — Jarvis continues without it
+
+try:
+    from network_tools import (
+        ping_sweep, arp_table_snapshot, check_latency, bandwidth_sample,
+        check_wan_status, diagnose_connectivity,
+    )
+
+    network_tools_reg = {
+        "ping_sweep": Tool("ping_sweep", "ICMP ping sweep of the local subnet (auto-detected from the real LAN adapter) — returns which hosts respond", Tier.TIER_1, ping_sweep, team="network"),
+        "arp_table_snapshot": Tool("arp_table_snapshot", "Read the local ARP table for a device inventory (IP + MAC pairs) — diffable across calls to spot a new device joining", Tier.TIER_1, arp_table_snapshot, team="network"),
+        "check_latency": Tool("check_latency", "Ping a host (default 8.8.8.8) N times and report min/avg/max latency and packet loss", Tier.TIER_1, check_latency, team="network"),
+        "bandwidth_sample": Tool("bandwidth_sample", "Sample this machine's network interface bytes sent/received over a short window via psutil, report an approximate throughput", Tier.TIER_1, bandwidth_sample, team="network"),
+        "check_wan_status": Tool("check_wan_status", "Query the router's UPnP/IGD service (if enabled) for external IP and WAN byte counters — degrades gracefully if UPnP isn't reachable", Tier.TIER_1, check_wan_status, team="network"),
+        "diagnose_connectivity": Tool("diagnose_connectivity", "Combine ping sweep, latency, ARP inventory, and WAN status into a synthesized connectivity diagnosis with suggested next steps (diagnosis only — never changes live config)", Tier.TIER_1, diagnose_connectivity, team="network"),
+    }
+    ops_tools = {**ops_tools, **network_tools_reg}
+except Exception as _net_err:
+    pass  # Network tools unavailable — Jarvis continues without them
 
 ALL_TOOLS = {**assistant_tools, **ops_tools}
 
@@ -235,12 +298,12 @@ try:
     from auth_check import AuthorizationError
 
     security_tools = {
-        "scan_ports": Tool("scan_ports", "Scan open ports on an authorized host (nmap required)", Tier.TIER_3, scan_ports, role="offense"),
-        "get_security_posture": Tool("get_security_posture", "Check local machine security posture: Defender, firewall, patches, listening services", Tier.TIER_1, get_security_posture, role="defense"),
-        "check_password_breach": Tool("check_password_breach", "Check if a password has appeared in known breaches via k-anonymity API (password never sent)", Tier.TIER_1, check_password_breach, role="defense"),
-        "check_email_breach": Tool("check_email_breach", "Check if an email address appears in known data breaches via HaveIBeenPwned API", Tier.TIER_1, check_email_breach, role="defense"),
-        "get_security_reference": Tool("get_security_reference", "Get educational reference on ethical hacking, CTF, or security certification topics", Tier.TIER_1, get_security_reference, role="practice"),
-        "check_credential_hygiene": Tool("check_credential_hygiene", "Analyze your local Bitwarden vault for reused/breached passwords via the bw CLI (requires BW_SESSION; Jarvis never touches your master password)", Tier.TIER_1, check_credential_hygiene, role="defense"),
+        "scan_ports": Tool("scan_ports", "Scan open ports on an authorized host (nmap required)", Tier.TIER_3, scan_ports, role="offense", team="hacking"),
+        "get_security_posture": Tool("get_security_posture", "Check local machine security posture: Defender, firewall, patches, listening services", Tier.TIER_1, get_security_posture, role="defense", team="cybersecurity"),
+        "check_password_breach": Tool("check_password_breach", "Check if a password has appeared in known breaches via k-anonymity API (password never sent)", Tier.TIER_1, check_password_breach, role="defense", team="cybersecurity"),
+        "check_email_breach": Tool("check_email_breach", "Check if an email address appears in known data breaches via HaveIBeenPwned API", Tier.TIER_1, check_email_breach, role="defense", team="cybersecurity"),
+        "get_security_reference": Tool("get_security_reference", "Get educational reference on ethical hacking, CTF, or security certification topics", Tier.TIER_1, get_security_reference, role="practice", team="hacking"),
+        "check_credential_hygiene": Tool("check_credential_hygiene", "Analyze your local Bitwarden vault for reused/breached passwords via the bw CLI (requires BW_SESSION; Jarvis never touches your master password)", Tier.TIER_1, check_credential_hygiene, role="defense", team="cybersecurity"),
     }
     ALL_TOOLS = {**ALL_TOOLS, **security_tools}
 except Exception as _sec_err:
@@ -254,11 +317,11 @@ try:
     )
 
     recon_tools = {
-        "lookup_cve": Tool("lookup_cve", "Search NIST NVD for CVEs matching a service/version string (public API, read-only)", Tier.TIER_1, lookup_cve, role="practice"),
-        "search_exploitdb": Tool("search_exploitdb", "Search Exploit-DB for public exploits matching a search term (public API, read-only, no exploit execution)", Tier.TIER_1, search_exploitdb, role="practice"),
-        "run_recon_pipeline": Tool("run_recon_pipeline", "Full recon pipeline (host discovery -> port scan -> service ID -> CVE lookup) against an authorized target only", Tier.TIER_3, run_recon_pipeline, role="offense"),
-        "shodan_lookup": Tool("shodan_lookup", "Look up an authorized IP/domain on Shodan (passive, requires SHODAN_API_KEY, still gated by authorized_targets.json)", Tier.TIER_1, shodan_lookup, role="offense"),
-        "run_privesc_enum": Tool("run_privesc_enum", "Run privilege escalation enumeration on the local machine (always authorized, local only)", Tier.TIER_1, run_privesc_enum, role="offense"),
+        "lookup_cve": Tool("lookup_cve", "Search NIST NVD for CVEs matching a service/version string (public API, read-only)", Tier.TIER_1, lookup_cve, role="practice", team="hacking"),
+        "search_exploitdb": Tool("search_exploitdb", "Search Exploit-DB for public exploits matching a search term (public API, read-only, no exploit execution)", Tier.TIER_1, search_exploitdb, role="practice", team="hacking"),
+        "run_recon_pipeline": Tool("run_recon_pipeline", "Full recon pipeline (host discovery -> port scan -> service ID -> CVE lookup) against an authorized target only", Tier.TIER_3, run_recon_pipeline, role="offense", team="hacking"),
+        "shodan_lookup": Tool("shodan_lookup", "Look up an authorized IP/domain on Shodan (passive, requires SHODAN_API_KEY, still gated by authorized_targets.json)", Tier.TIER_1, shodan_lookup, role="offense", team="hacking"),
+        "run_privesc_enum": Tool("run_privesc_enum", "Run privilege escalation enumeration on the local machine (always authorized, local only)", Tier.TIER_1, run_privesc_enum, role="offense", team="hacking"),
     }
     ALL_TOOLS = {**ALL_TOOLS, **recon_tools}
 except Exception as _recon_err:
@@ -272,11 +335,11 @@ try:
     )
 
     ctf_tools = {
-        "identify_hash": Tool("identify_hash", "Identify a hash's type from its length/format (no cracking, informational only)", Tier.TIER_1, identify_hash, role="practice"),
-        "crack_hash": Tool("crack_hash", "Attempt to crack a hash via hashcat/john for a CTF or practice lab. REQUIRES a 'source' arg of 'ctf' or 'practice' — refuses otherwise.", Tier.TIER_2, crack_hash, role="practice"),
-        "ctf_assistant": Tool("ctf_assistant", "Analyze a CTF challenge description and return category + methodology context for the LLM", Tier.TIER_1, ctf_assistant, role="practice"),
-        "cert_study_session": Tool("cert_study_session", "Generate a study session context for a security certification (CEH, OSCP, Security+, etc.)", Tier.TIER_1, cert_study_session, role="practice"),
-        "generate_pentest_report": Tool("generate_pentest_report", "Generate a markdown pentest report from recon results/findings, saved to data/pentest_reports/", Tier.TIER_2, generate_pentest_report, role="practice"),
+        "identify_hash": Tool("identify_hash", "Identify a hash's type from its length/format (no cracking, informational only)", Tier.TIER_1, identify_hash, role="practice", team="hacking"),
+        "crack_hash": Tool("crack_hash", "Attempt to crack a hash via hashcat/john for a CTF or practice lab. REQUIRES a 'source' arg of 'ctf' or 'practice' — refuses otherwise.", Tier.TIER_2, crack_hash, role="practice", team="hacking"),
+        "ctf_assistant": Tool("ctf_assistant", "Analyze a CTF challenge description and return category + methodology context for the LLM", Tier.TIER_1, ctf_assistant, role="practice", team="hacking"),
+        "cert_study_session": Tool("cert_study_session", "Generate a study session context for a security certification (CEH, OSCP, Security+, etc.)", Tier.TIER_1, cert_study_session, role="practice", team="hacking"),
+        "generate_pentest_report": Tool("generate_pentest_report", "Generate a markdown pentest report from recon results/findings, saved to data/pentest_reports/", Tier.TIER_2, generate_pentest_report, role="practice", team="hacking"),
     }
     ALL_TOOLS = {**ALL_TOOLS, **ctf_tools}
 except Exception as _ctf_err:
@@ -290,12 +353,12 @@ try:
     )
 
     osint_tools = {
-        "dns_recon": Tool("dns_recon", "Resolve A/AAAA/MX/TXT/NS/CNAME records for an authorized domain via nslookup", Tier.TIER_1, dns_recon, role="offense"),
-        "subdomain_enum": Tool("subdomain_enum", "Passively enumerate subdomains for an authorized domain via public certificate-transparency logs (crt.sh) — nothing sent to the target itself", Tier.TIER_1, subdomain_enum, role="offense"),
-        "whois_lookup": Tool("whois_lookup", "WHOIS registration lookup for an authorized domain/IP (requires a local whois client)", Tier.TIER_1, whois_lookup, role="offense"),
-        "tech_fingerprint": Tool("tech_fingerprint", "Passively fingerprint the tech stack (server, CMS, JS frameworks) of an authorized URL from one GET request", Tier.TIER_1, tech_fingerprint, role="offense"),
-        "check_ssl_cert": Tool("check_ssl_cert", "Check an authorized host's TLS certificate: issuer, validity window, days until expiry", Tier.TIER_1, check_ssl_cert, role="offense"),
-        "http_security_headers_audit": Tool("http_security_headers_audit", "Audit an authorized URL for standard defensive HTTP headers (HSTS, CSP, X-Frame-Options, ...) — same checks as securityheaders.com", Tier.TIER_1, http_security_headers_audit, role="offense"),
+        "dns_recon": Tool("dns_recon", "Resolve A/AAAA/MX/TXT/NS/CNAME records for an authorized domain via nslookup", Tier.TIER_1, dns_recon, role="offense", team="hacking"),
+        "subdomain_enum": Tool("subdomain_enum", "Passively enumerate subdomains for an authorized domain via public certificate-transparency logs (crt.sh) — nothing sent to the target itself", Tier.TIER_1, subdomain_enum, role="offense", team="hacking"),
+        "whois_lookup": Tool("whois_lookup", "WHOIS registration lookup for an authorized domain/IP (requires a local whois client)", Tier.TIER_1, whois_lookup, role="offense", team="hacking"),
+        "tech_fingerprint": Tool("tech_fingerprint", "Passively fingerprint the tech stack (server, CMS, JS frameworks) of an authorized URL from one GET request", Tier.TIER_1, tech_fingerprint, role="offense", team="hacking"),
+        "check_ssl_cert": Tool("check_ssl_cert", "Check an authorized host's TLS certificate: issuer, validity window, days until expiry", Tier.TIER_1, check_ssl_cert, role="offense", team="hacking"),
+        "http_security_headers_audit": Tool("http_security_headers_audit", "Audit an authorized URL for standard defensive HTTP headers (HSTS, CSP, X-Frame-Options, ...) — same checks as securityheaders.com", Tier.TIER_1, http_security_headers_audit, role="offense", team="hacking"),
     }
     ALL_TOOLS = {**ALL_TOOLS, **osint_tools}
 except Exception as _osint_err:
@@ -308,10 +371,12 @@ try:
     )
 
     reference_tools = {
-        "mitre_attack_lookup": Tool("mitre_attack_lookup", "Look up a MITRE ATT&CK tactic or technique by name, ID, or keyword (curated reference set)", Tier.TIER_1, mitre_attack_lookup, role="practice"),
-        "owasp_top10_reference": Tool("owasp_top10_reference", "Look up an OWASP Top 10 (2021) category — example, impact, mitigation. No topic returns all ten.", Tier.TIER_1, owasp_top10_reference, role="practice"),
-        "exploitdb_usage": Tool("exploitdb_usage", "Fetch the published usage notes/source for a specific Exploit-DB entry by ID — read-only, same public content search_exploitdb links to", Tier.TIER_1, exploitdb_usage, role="practice"),
-        "reverse_shell_cheatsheet": Tool("reverse_shell_cheatsheet", "Static reference: common reverse-shell one-liners (bash/python/perl/php/powershell/nc/socat), filled in with your listener's LHOST/LPORT if given", Tier.TIER_1, reverse_shell_cheatsheet, role="practice"),
+        # mitre/owasp are defensive reference material — Cybersecurity team's domain.
+        "mitre_attack_lookup": Tool("mitre_attack_lookup", "Look up a MITRE ATT&CK tactic or technique by name, ID, or keyword (curated reference set)", Tier.TIER_1, mitre_attack_lookup, role="practice", team="cybersecurity"),
+        "owasp_top10_reference": Tool("owasp_top10_reference", "Look up an OWASP Top 10 (2021) category — example, impact, mitigation. No topic returns all ten.", Tier.TIER_1, owasp_top10_reference, role="practice", team="cybersecurity"),
+        # exploitdb/reverse-shell reference is what Hacking team consults mid-engagement.
+        "exploitdb_usage": Tool("exploitdb_usage", "Fetch the published usage notes/source for a specific Exploit-DB entry by ID — read-only, same public content search_exploitdb links to", Tier.TIER_1, exploitdb_usage, role="practice", team="hacking"),
+        "reverse_shell_cheatsheet": Tool("reverse_shell_cheatsheet", "Static reference: common reverse-shell one-liners (bash/python/perl/php/powershell/nc/socat), filled in with your listener's LHOST/LPORT if given", Tier.TIER_1, reverse_shell_cheatsheet, role="practice", team="hacking"),
     }
     ALL_TOOLS = {**ALL_TOOLS, **reference_tools}
 except Exception as _ref_err:
@@ -327,9 +392,9 @@ try:
     from security_modules.exploit_tools import generate_payload, run_exploit_module, msf_module_info
 
     exploit_tools_reg = {
-        "generate_payload": Tool("generate_payload", "Generate an attack payload via msfvenom for an authorized target — writes a file only, never executes/deploys it (Tier 4: requires explicit confirmation)", Tier.TIER_4, generate_payload, role="offense"),
-        "run_exploit_module": Tool("run_exploit_module", "Run one exact, named Metasploit exploit module against an authorized target, one shot, no session chaining (Tier 4: requires explicit confirmation)", Tier.TIER_4, run_exploit_module, role="offense"),
-        "msf_module_info": Tool("msf_module_info", "Read-only: search Metasploit modules matching a term and return the top match's documentation — no module is run", Tier.TIER_1, msf_module_info, role="practice"),
+        "generate_payload": Tool("generate_payload", "Generate an attack payload via msfvenom for an authorized target — writes a file only, never executes/deploys it (Tier 4: requires explicit confirmation)", Tier.TIER_4, generate_payload, role="offense", team="hacking"),
+        "run_exploit_module": Tool("run_exploit_module", "Run one exact, named Metasploit exploit module against an authorized target, one shot, no session chaining (Tier 4: requires explicit confirmation)", Tier.TIER_4, run_exploit_module, role="offense", team="hacking"),
+        "msf_module_info": Tool("msf_module_info", "Read-only: search Metasploit modules matching a term and return the top match's documentation — no module is run", Tier.TIER_1, msf_module_info, role="practice", team="hacking"),
     }
     ALL_TOOLS = {**ALL_TOOLS, **exploit_tools_reg}
 except Exception as _exploit_err:
@@ -340,7 +405,7 @@ try:
     from security_modules.dependency_audit import check_dependency_vulnerabilities
 
     dependency_tools = {
-        "check_dependency_vulnerabilities": Tool("check_dependency_vulnerabilities", "Check a local requirements.txt's exactly-pinned packages against known CVEs via OSV.dev (defaults to this project's own requirements.txt)", Tier.TIER_1, check_dependency_vulnerabilities, role="defense"),
+        "check_dependency_vulnerabilities": Tool("check_dependency_vulnerabilities", "Check a local requirements.txt's exactly-pinned packages against known CVEs via OSV.dev (defaults to this project's own requirements.txt)", Tier.TIER_1, check_dependency_vulnerabilities, role="defense", team="cybersecurity"),
     }
     ALL_TOOLS = {**ALL_TOOLS, **dependency_tools}
 except Exception as _dep_err:
@@ -383,4 +448,11 @@ REQUIRES_CAPABILITY = {
     "write_local_file": "filesystem",
     "move_or_rename_path": "filesystem",
     "run_self_audit": "filesystem",  # shells to git ls-files, reads devices.json
+    # Network team tools (Phase 4) — all reach the local network the server sits on.
+    "ping_sweep": "filesystem",
+    "check_latency": "filesystem",          # pings from wherever the server host actually is
+    "arp_table_snapshot": "filesystem",     # reads the server host's own ARP table
+    "bandwidth_sample": "filesystem",       # psutil reads the server host's own interfaces
+    "check_wan_status": "filesystem",       # SSDP multicast from the server host
+    "diagnose_connectivity": "filesystem",  # composes the above
 }

@@ -149,12 +149,21 @@ async def _lifespan(_app: FastAPI):
     except Exception as e:
         print(f"[Server] Daily briefing loop not started: {e}")
 
+    team_board_task = None
+    try:
+        from team_board_dispatcher import team_board_dispatch_loop
+        team_board_task = asyncio.create_task(team_board_dispatch_loop(brain=brain, broadcast_all=_broadcast_all))
+    except Exception as e:
+        print(f"[Server] Team board dispatcher not started: {e}")
+
     yield
 
     if monitor_task:
         monitor_task.cancel()
     if briefing_task:
         briefing_task.cancel()
+    if team_board_task:
+        team_board_task.cancel()
 
 
 app = FastAPI(title="Jarvis Server", lifespan=_lifespan)
@@ -264,9 +273,13 @@ def _tool_catalog() -> list:
 
 
 # ---------------------------------------------------------------------------
-# Streaming turn execution — bridges JarvisBrain.process_turn_stream() (a blocking
-# generator) onto the event loop via a worker thread + asyncio.Queue, broadcasting each
-# event to every websocket currently watching the conversation as it happens.
+# Streaming turn execution — bridges team_router.route_and_run() (a blocking generator,
+# itself built on JarvisBrain.process_turn_stream(), one call per routed team — see
+# team_router.py) onto the event loop via a worker thread + asyncio.Queue, broadcasting
+# each event to every websocket currently watching the conversation as it happens.
+# Phase 4: this used to call brain.process_turn_stream() directly for a single flat-tool
+# loop; team_router wraps that same engine per-team now, but yields the identical
+# (kind, payload) event shape, so nothing below this point needed to change.
 # ---------------------------------------------------------------------------
 
 async def _run_turn(conversation_id: str, chat_history: list, capabilities: list):
@@ -278,8 +291,9 @@ async def _run_turn(conversation_id: str, chat_history: list, capabilities: list
             asyncio.run_coroutine_threadsafe(q.put(("status", {"event": event, "data": data})), loop).result()
 
         try:
-            for kind, payload in brain.process_turn_stream(
-                chat_history, capabilities, 3, on_status=_on_status, conversation_id=conversation_id
+            import team_router
+            for kind, payload in team_router.route_and_run(
+                brain, chat_history, capabilities, conversation_id=conversation_id, on_status=_on_status
             ):
                 asyncio.run_coroutine_threadsafe(q.put((kind, payload)), loop).result()
         except Exception as e:

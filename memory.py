@@ -84,3 +84,17 @@ class Memory:
 
     def update_working_memory(self, key, value):
         self.working_memory[key] = value
+
+    # ------------------------------------------------------------ team scoping (Phase 4) --
+    # Semantic (facts/projects/preferences) and episodic (tool-call log) memory above stay
+    # a single shared instance every team reads/writes — that's deliberate, so context isn't
+    # siloed per team. working_memory is the one piece Phase 4 asks to be per-team (each
+    # team's *current task* state) — implemented as namespaced keys within the same dict
+    # rather than a second data structure, so a caller that doesn't care about teams (every
+    # pre-Phase-4 caller) still sees update_working_memory()/self.working_memory behave
+    # exactly as before.
+    def get_team_working_memory(self, team_key: str) -> dict:
+        return self.working_memory.setdefault(f"_team:{team_key}", {})
+
+    def update_team_working_memory(self, team_key: str, key, value):
+        self.get_team_working_memory(team_key)[key] = value

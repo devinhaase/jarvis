@@ -61,7 +61,7 @@ UNTRUSTED CONTENT
 """
 
 SYSTEM_PROMPT_TEMPLATE = """{persona}
-
+{team_context}
 LONG-TERM MEMORY (cross-session context):
 {semantic_context}
 
@@ -96,14 +96,22 @@ Example — a tool is needed first:
 [TOOL: check_system_health {{}}]
 """
 
-def get_tool_descriptions():
+def get_tool_descriptions(tool_subset: set = None):
+    """Phase 4: `tool_subset`, if given, restricts the listing to just those tool names —
+    this is how a team's scoped sub-loop sees only its own tools in the prompt. This alone
+    is prompt-level hiding, not enforcement — Coordinator.run_tools()'s own tool_subset
+    check is the real gate, same defense-in-depth pattern offense-authorization already
+    uses (checked both by the tool and centrally at dispatch)."""
     desc = ""
     for name, tool in ALL_TOOLS.items():
+        if tool_subset is not None and name not in tool_subset:
+            continue
         desc += f"- {name}: {tool.description}. (Tier {tool.tier.name})\n"
     return desc
 
 def build_system_prompt(semantic_context: str = "", recent_episodes: list = None,
-                         attached_files_context: str = "") -> str:
+                         attached_files_context: str = "", tool_subset: set = None,
+                         team_context: str = "") -> str:
     episodes_str = ""
     if recent_episodes:
         for ep in recent_episodes[-3:]:
@@ -114,10 +122,11 @@ def build_system_prompt(semantic_context: str = "", recent_episodes: list = None
 
     return SYSTEM_PROMPT_TEMPLATE.format(
         persona=PERSONA,
+        team_context=("\n" + team_context + "\n") if team_context else "",
         semantic_context=semantic_context if semantic_context else "  None stored yet.",
         recent_episodes=episodes_str,
         attached_files=attached_files_context if attached_files_context else "  None attached.",
-        tool_descriptions=get_tool_descriptions()
+        tool_descriptions=get_tool_descriptions(tool_subset)
     )
 
 def extract_remember_facts(response_text: str) -> list:
