@@ -1,11 +1,11 @@
 ---
 name: synth: tcpscanner
-status: proposed
+status: active
 tier: TIER_4
 team: hacking
 version: 1
 created_at: 1786202799.7826958
-updated_at: 1786202799.7826958
+updated_at: 1786205854.443262
 success_count: 0
 fail_count: 0
 flagged: false

@@ -125,6 +125,14 @@ async def _maybe_run_briefing(brain, broadcast_all):
         })
         await broadcast_all({"type": "conversation_list_changed"})
 
+    # Phase 6 item 6: "briefing" category.
+    try:
+        import push_notifications as _push
+        await asyncio.to_thread(_push.send_to_all, "briefing", "Jarvis: morning briefing", text,
+                                 tag="briefing", conversation_id=conv_id)
+    except Exception:
+        pass
+
 
 async def daily_briefing_loop(brain=None, broadcast_all=None):
     """Runs forever until cancelled — checks every CHECK_INTERVAL_SECONDS whether it's past

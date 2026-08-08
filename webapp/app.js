@@ -10,6 +10,19 @@ const els = {
   sidebarOverlay: $("#sidebarOverlay"),
   newConvBtn: $("#newConvBtn"),
   themeToggleBtn: $("#themeToggleBtn"),
+  pushSettingsBtn: $("#pushSettingsBtn"),
+  pushModal: $("#pushModal"),
+  pushCloseBtn: $("#pushCloseBtn"),
+  pushEnabledToggle: $("#pushEnabledToggle"),
+  pushCategoriesSection: $("#pushCategoriesSection"),
+  pushCatApprovals: $("#pushCatApprovals"),
+  pushCatAlerts: $("#pushCatAlerts"),
+  pushCatBriefing: $("#pushCatBriefing"),
+  pushCatMessages: $("#pushCatMessages"),
+  pushQuietEnabled: $("#pushQuietEnabled"),
+  pushQuietStart: $("#pushQuietStart"),
+  pushQuietEnd: $("#pushQuietEnd"),
+  pushTestBtn: $("#pushTestBtn"),
   searchInput: $("#searchInput"),
   convList: $("#convList"),
   convSectionLabel: $("#convSectionLabel"),
@@ -240,6 +253,15 @@ function handleServerMessage(msg) {
 
     case "integration_status":
       renderIntegrationStatus(msg);
+      break;
+
+    case "push_settings":
+      renderPushSettings(msg);
+      break;
+
+    case "push_test_result":
+      els.pushTestBtn.textContent = msg.sent ? "Sent — check for it" : "Not sent (see notes below)";
+      setTimeout(() => { els.pushTestBtn.textContent = "Send test notification"; }, 3000);
       break;
 
     case "user_message":
@@ -693,6 +715,78 @@ function renderIntegrationStatus(status) {
     if (el) el.classList.toggle("connected", !!connected);
   }
 }
+
+// ---------------------------------------------------------------------------
+// Notification settings modal (Phase 6 item 6) — the toggle drives the actual
+// subscribe/unsubscribe flow (enablePushNotifications/disablePushNotifications, defined
+// above near the service worker registration); everything below just reflects and edits
+// server-held prefs (categories, quiet hours) for whichever device_id this browser is.
+// ---------------------------------------------------------------------------
+
+els.pushSettingsBtn.addEventListener("click", () => {
+  send({ type: "get_push_settings" });
+  els.pushModal.classList.remove("hidden");
+});
+els.pushCloseBtn.addEventListener("click", () => els.pushModal.classList.add("hidden"));
+
+function renderPushSettings(settings) {
+  els.pushEnabledToggle.checked = !!settings.subscribed;
+  els.pushCategoriesSection.classList.toggle("hidden", !settings.subscribed);
+  const cats = settings.categories || {};
+  els.pushCatApprovals.checked = cats.approvals !== false;
+  els.pushCatAlerts.checked = cats.alerts !== false;
+  els.pushCatBriefing.checked = cats.briefing !== false;
+  els.pushCatMessages.checked = !!cats.messages;
+  const qh = settings.quiet_hours || {};
+  els.pushQuietEnabled.checked = !!qh.enabled;
+  els.pushQuietStart.value = qh.start || "22:00";
+  els.pushQuietEnd.value = qh.end || "07:00";
+}
+
+els.pushEnabledToggle.addEventListener("change", async () => {
+  if (els.pushEnabledToggle.checked) {
+    const ok = await enablePushNotifications();
+    if (!ok) els.pushEnabledToggle.checked = false;  // permission denied or unsupported
+    else send({ type: "get_push_settings" });
+  } else {
+    await disablePushNotifications();
+    els.pushCategoriesSection.classList.add("hidden");
+  }
+});
+
+function _sendCategoryUpdate() {
+  send({
+    type: "set_push_settings",
+    categories: {
+      approvals: els.pushCatApprovals.checked,
+      alerts: els.pushCatAlerts.checked,
+      briefing: els.pushCatBriefing.checked,
+      messages: els.pushCatMessages.checked,
+    },
+  });
+}
+for (const el of [els.pushCatApprovals, els.pushCatAlerts, els.pushCatBriefing, els.pushCatMessages]) {
+  el.addEventListener("change", _sendCategoryUpdate);
+}
+
+function _sendQuietHoursUpdate() {
+  send({
+    type: "set_push_settings",
+    quiet_hours: {
+      enabled: els.pushQuietEnabled.checked,
+      start: els.pushQuietStart.value || "22:00",
+      end: els.pushQuietEnd.value || "07:00",
+    },
+  });
+}
+for (const el of [els.pushQuietEnabled, els.pushQuietStart, els.pushQuietEnd]) {
+  el.addEventListener("change", _sendQuietHoursUpdate);
+}
+
+els.pushTestBtn.addEventListener("click", () => {
+  els.pushTestBtn.textContent = "Sending…";
+  send({ type: "test_push_notification" });
+});
 
 // ---------------------------------------------------------------------------
 // Skill review queue (Phase 5) — proposed skills need Devin's explicit approve/edit/
@@ -1341,16 +1435,28 @@ document.getElementById("exportBtn").addEventListener("click", () => {
 // ---------------------------------------------------------------------------
 // Browser notifications + PWA installability
 // ---------------------------------------------------------------------------
-// Foreground-only: this requires the tab to still be open (just not focused/visible), not
-// a true background/mobile push — that would need a push server and a subscription flow,
-// a materially bigger undertaking than "notify me while I'm on another tab."
+// Two independent layers, deliberately kept separate:
+//  - notifyIfHidden(): foreground-only, plain Notification API — needs the tab still open
+//    (just not focused). Unchanged from before this item.
+//  - Phase 6 item 6, below: real Web Push via the service worker's push subscription —
+//    reaches a device even with every tab and the browser itself closed. This is what makes
+//    a phone notification possible at all; notifyIfHidden alone never could.
 
 if ("Notification" in window && Notification.permission === "default") {
   Notification.requestPermission().catch(() => {});
 }
 
+let _swRegistration = null;
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("/sw.js").catch(() => {});
+  navigator.serviceWorker.register("/sw.js").then((reg) => { _swRegistration = reg; }).catch(() => {});
+  // Deep link from a notification tap on an already-open tab (see sw.js's
+  // notificationclick handler) — the SW postMessage()s us instead of navigating, since a
+  // service worker can't change what's on screen in a client it doesn't own directly.
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event.data && event.data.type === "open_conversation" && event.data.conversation_id) {
+      openConversation(event.data.conversation_id);
+    }
+  });
 }
 
 function notifyIfHidden(title, body) {
@@ -1363,4 +1469,59 @@ function notifyIfHidden(title, body) {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 6 item 6: push subscription + settings (categories, quiet hours)
+// ---------------------------------------------------------------------------
+
+function _b64urlToUint8Array(b64url) {
+  const pad = "=".repeat((4 - (b64url.length % 4)) % 4);
+  const base64 = (b64url + pad).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(base64);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
+}
+
+async function enablePushNotifications() {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) return false;
+  if (Notification.permission !== "granted") {
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted") return false;
+  }
+  const reg = _swRegistration || await navigator.serviceWorker.ready;
+  const { key } = await fetch("/push-public-key").then((r) => r.json());
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) {
+    sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: _b64urlToUint8Array(key),
+    });
+  }
+  send({ type: "push_subscribe", subscription: sub.toJSON() });
+  return true;
+}
+
+async function disablePushNotifications() {
+  send({ type: "push_unsubscribe" });
+  if (_swRegistration) {
+    const sub = await _swRegistration.pushManager.getSubscription();
+    if (sub) await sub.unsubscribe().catch(() => {});
+  }
+}
+
+// ---------------------------------------------------------------------------
 boot();
+
+// Deep link: a notification tap that had to open a fresh tab/window (sw.js's
+// notificationclick openWindow fallback) lands here with ?conv=<id> — open it once we're
+// actually connected (state.conversationId gets set by the "ready" handler first).
+(function _handleDeepLinkOnLoad() {
+  const params = new URLSearchParams(window.location.search);
+  const conv = params.get("conv");
+  if (!conv) return;
+  const tryOpen = () => {
+    if (state.ws && state.ws.readyState === WebSocket.OPEN) openConversation(conv);
+    else setTimeout(tryOpen, 300);
+  };
+  tryOpen();
+  history.replaceState(null, "", window.location.pathname);
+})();

@@ -91,6 +91,28 @@ APPROVAL_DEFAULT = {"TIER_3": True, "TIER_4": False}  # what happens if nobody a
 
 registry = DeviceRegistry()
 _auth_limiter = AuthRateLimiter()  # Phase 8: lockout after repeated failed device-auth attempts
+
+
+def _is_loopback(host: str) -> bool:
+    """Phase 6 item 7: loopback (127.0.0.0/8, ::1) is exempt from the auth rate limiter.
+    Reasoning, not just a convenience carve-out: this app's whole threat model is "trusted
+    home LAN, not hostile network" (see _ensure_web_gui_device()'s docstring) — an attacker
+    who can already send TCP to 127.0.0.1 on this machine has local code execution on the
+    server itself, at which point devices.json's plaintext tokens are directly readable
+    anyway; rate-limiting buys no real security there. What it *was* costing: a single
+    misbehaving localhost client (a stale browser tab holding an old token, found live
+    during this item's testing — see task.md) could lock out every OTHER localhost client,
+    including the real web GUI, for a full 5-minute cooldown — repeatedly, since the stale
+    client keeps retrying and re-triggers a fresh lockout the moment the old one expires.
+    Non-loopback sources (a phone on the LAN, anything over the future Tailscale VPN) are
+    unaffected — full rate limiting still applies there."""
+    try:
+        import ipaddress
+        return ipaddress.ip_address(host).is_loopback
+    except Exception:
+        return False
+
+
 shared_memory = Memory()  # the one long-term memory every session reads/writes
 
 
@@ -244,6 +266,29 @@ async def _wait_for_approval(action_name: str, tier_name: str) -> bool:
         "type": "approval_request", "approval_id": approval_id,
         "action": action_name, "tier": tier_name,
     })
+    # Phase 6 item 6: a WS broadcast alone only reaches a device with the app already open —
+    # the entire reason this item exists is to reach a phone that's asleep in your pocket.
+    # Fire-and-forget on a worker thread (pywebpush does a real HTTP POST) so a slow or
+    # unreachable push service can never add latency to the approval wait itself.
+    # TIER_4's approval_fn defaults to *deny* on an unanswered timeout — silence during quiet
+    # hours would routinely deny things unattended, not just defer word of them — so TIER_4
+    # is the one category exception that bypasses quiet hours (critical=True). TIER_3 is
+    # informational only: it defaults to *allow* after just 3 seconds, faster than any push
+    # notification could realistically arrive and be acted on, so it's suppressed like
+    # anything else during quiet hours.
+    try:
+        import push_notifications as _push
+        is_tier4 = tier_name == "TIER_4"
+        title = f"Jarvis: {'confirm' if is_tier4 else 'notice'} — {action_name}"
+        body = (
+            f"{action_name} needs your OK within {int(APPROVAL_TIMEOUT.get('TIER_4', 60))}s."
+            if is_tier4 else f"{action_name} will proceed in a few seconds unless you cancel."
+        )
+        asyncio.create_task(asyncio.to_thread(
+            _push.send_to_all, "approvals", title, body, tag="approval", critical=is_tier4,
+        ))
+    except Exception:
+        pass
     try:
         return await asyncio.wait_for(future, timeout=APPROVAL_TIMEOUT.get(tier_name, 30.0))
     except asyncio.TimeoutError:
@@ -526,20 +571,24 @@ async def websocket_endpoint(websocket: WebSocket):
     # alone never stopped unlimited guessing. Keyed by IP, not device_id, since a bad guess
     # doesn't reliably know a real device_id either.
     client_host = websocket.client.host if websocket.client else "unknown"
-    locked_until = _auth_limiter.is_locked(client_host)
-    if locked_until:
-        wait_s = int(locked_until - time.time())
-        await websocket.send_json({"type": "error", "message": f"Too many failed auth attempts. Try again in {wait_s}s."})
-        await websocket.close(code=4429, reason="Rate limited")
-        return
+    rate_limited = not _is_loopback(client_host)  # Phase 6 item 7 — see _is_loopback()'s docstring
+    if rate_limited:
+        locked_until = _auth_limiter.is_locked(client_host)
+        if locked_until:
+            wait_s = int(locked_until - time.time())
+            await websocket.send_json({"type": "error", "message": f"Too many failed auth attempts. Try again in {wait_s}s."})
+            await websocket.close(code=4429, reason="Rate limited")
+            return
 
     allowed_caps = registry.validate(device_id, token)
     if allowed_caps is None:
-        _auth_limiter.record_failure(client_host)
+        if rate_limited:
+            _auth_limiter.record_failure(client_host)
         await websocket.send_json({"type": "error", "message": "Unknown device or invalid token."})
         await websocket.close(code=4001, reason="Unauthorized")
         return
-    _auth_limiter.record_success(client_host)
+    if rate_limited:
+        _auth_limiter.record_success(client_host)
 
     # Never trust what the client claims beyond what this device was registered for.
     capabilities = list(requested_caps & set(allowed_caps))
@@ -675,6 +724,52 @@ async def websocket_endpoint(websocket: WebSocket):
 
             if mtype == "get_integration_status":
                 await websocket.send_json({"type": "integration_status", **_integration_status()})
+                continue
+
+            # ------------------------------------------------------------ Phase 6 item 6: push --
+            # Subscriptions/settings are keyed by this socket's own device_id (from the hello
+            # handshake, never client-supplied here) — a device can only ever manage its own
+            # push subscription, matching the "never trust what the client claims beyond what
+            # this device was registered for" rule the capability handshake above already
+            # enforces.
+            if mtype == "push_subscribe":
+                import push_notifications as _push
+                sub = msg.get("subscription")
+                if isinstance(sub, dict) and sub.get("endpoint"):
+                    _push.subscribe(info["device_id"], sub)
+                await websocket.send_json({"type": "push_settings", **_push.get_settings(info["device_id"])})
+                continue
+
+            if mtype == "push_unsubscribe":
+                import push_notifications as _push
+                _push.unsubscribe(info["device_id"])
+                await websocket.send_json({"type": "push_settings", **_push.get_settings(info["device_id"])})
+                continue
+
+            if mtype == "get_push_settings":
+                import push_notifications as _push
+                await websocket.send_json({"type": "push_settings", **_push.get_settings(info["device_id"])})
+                continue
+
+            if mtype == "set_push_settings":
+                import push_notifications as _push
+                updated = _push.set_settings(info["device_id"], categories=msg.get("categories"), quiet_hours=msg.get("quiet_hours"))
+                await websocket.send_json({"type": "push_settings", **updated})
+                continue
+
+            if mtype == "test_push_notification":
+                # Deterministic path for the settings modal's "Send test notification"
+                # button — calls send_to_device directly rather than going through the LLM
+                # like tools.py's send_test_push tool does, so the button's result is
+                # immediate and unambiguous rather than depending on the model choosing to
+                # call the right tool.
+                import push_notifications as _push
+                ok = await asyncio.to_thread(
+                    _push.send_to_device, info["device_id"], "messages",
+                    "Jarvis: test notification", "This is a test push notification.", tag="test",
+                    force=True,
+                )
+                await websocket.send_json({"type": "push_test_result", "sent": ok})
                 continue
 
             # ------------------------------------------------------------ Phase 5: skill review queue --
@@ -837,6 +932,19 @@ async def websocket_endpoint(websocket: WebSocket):
                 "tools_ran": [t.get("tool") for t in result.get("tools_ran", [])],
                 "denied": result.get("denied", []),
             })
+            if assistant_text:
+                # Phase 6 item 6: "messages" category, off by default (see
+                # push_notifications.py's docstring) — this fires on every completed turn
+                # regardless of whether any device has a tab open, unlike notifyIfHidden's
+                # client-side check.
+                try:
+                    import push_notifications as _push
+                    asyncio.create_task(asyncio.to_thread(
+                        _push.send_to_all, "messages", "Jarvis", assistant_text,
+                        tag="message", conversation_id=conv_id,
+                    ))
+                except Exception:
+                    pass
 
             asyncio.create_task(_maybe_autotitle(conv_id))
             asyncio.create_task(_maybe_update_summary(conv_id))
@@ -887,20 +995,24 @@ async def mind_websocket_endpoint(websocket: WebSocket):
     device_id = hello.get("device_id", "")
     token = hello.get("token", "")
     client_host = websocket.client.host if websocket.client else "unknown"
+    rate_limited = not _is_loopback(client_host)  # Phase 6 item 7 — see _is_loopback()'s docstring
 
-    locked_until = _auth_limiter.is_locked(client_host)
-    if locked_until:
-        wait_s = int(locked_until - time.time())
-        await websocket.send_json({"type": "error", "message": f"Too many failed auth attempts. Try again in {wait_s}s."})
-        await websocket.close(code=4429, reason="Rate limited")
-        return
+    if rate_limited:
+        locked_until = _auth_limiter.is_locked(client_host)
+        if locked_until:
+            wait_s = int(locked_until - time.time())
+            await websocket.send_json({"type": "error", "message": f"Too many failed auth attempts. Try again in {wait_s}s."})
+            await websocket.close(code=4429, reason="Rate limited")
+            return
 
     if registry.validate(device_id, token) is None:
-        _auth_limiter.record_failure(client_host)
+        if rate_limited:
+            _auth_limiter.record_failure(client_host)
         await websocket.send_json({"type": "error", "message": "Unknown device or invalid token."})
         await websocket.close(code=4001, reason="Unauthorized")
         return
-    _auth_limiter.record_success(client_host)
+    if rate_limited:
+        _auth_limiter.record_success(client_host)
 
     mind_watchers.add(websocket)
     try:
@@ -941,6 +1053,15 @@ async def gui_config():
     _ensure_web_gui_device() for why this is unauthenticated by design."""
     token = _ensure_web_gui_device()
     return {"device_id": WEB_GUI_DEVICE_ID, "token": token}
+
+
+@app.get("/push-public-key")
+async def push_public_key():
+    """Phase 6 item 6: the VAPID public key `pushManager.subscribe()` needs. Unauthenticated
+    for the same reason /gui-config is — it's a public key, not a secret, and anyone who
+    can already reach this endpoint can already reach everything else here."""
+    import push_notifications
+    return {"key": push_notifications.get_vapid_public_key_b64()}
 
 
 @app.get("/health")

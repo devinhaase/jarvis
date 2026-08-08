@@ -667,6 +667,35 @@ html, body {
   font-weight: 600;
 }
 
+/* Phase 6 item 6 — notification settings modal */
+.push-settings-body { display: flex; flex-direction: column; gap: 4px; }
+.push-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 13px;
+  cursor: pointer;
+}
+.push-toggle-row input[type="checkbox"] { flex-shrink: 0; width: 15px; height: 15px; }
+.push-categories.hidden { display: none; }
+.push-quiet-times {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0 10px 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.push-quiet-times input[type="time"] {
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+}
+
 #projectNameInput, .move-list {
   width: 100%;
 }

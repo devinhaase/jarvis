@@ -163,6 +163,15 @@ async def _take_snapshot_and_check(broadcast_all):
                 # even if they weren't watching it, so a fresh finding doesn't sit
                 # invisible until someone happens to reopen "Security Monitor".
                 await broadcast_all({"type": "conversation_list_changed"})
+            # Phase 6 item 6: "alerts" category — a posture regression is exactly the kind
+            # of thing worth reaching a phone for, not just a conversation nobody has open.
+            try:
+                import push_notifications as _push
+                headline = findings[0] if len(findings) == 1 else f"{len(findings)} changes — {findings[0]}"
+                await asyncio.to_thread(_push.send_to_all, "alerts", "Jarvis: security posture change", headline,
+                                         tag="posture", conversation_id=conv_id)
+            except Exception:
+                pass
 
     _save_snapshot(new_snapshot)
 

@@ -324,6 +324,32 @@ try:
 except Exception as _google_err:
     pass  # Google tools unavailable — Jarvis continues without them
 
+# --- Push notifications (Phase 6 item 6) — the only tool-facing surface; subscribing,
+# category toggles, and quiet hours are device settings, not something a conversation turn
+# should change, so they live entirely in server.py's WS handlers, not here.
+try:
+    from push_notifications import send_to_all as _push_send_to_all
+
+    def _send_test_push(message="Test notification from Jarvis"):
+        sent = _push_send_to_all("messages", "Jarvis: test notification", message, tag="test")
+        return f"Sent to {sent} subscribed device(s)." if sent else (
+            "No subscribed device received it — either nothing is subscribed, or the "
+            "'messages' category is toggled off, or it's currently within a subscribed "
+            "device's quiet hours."
+        )
+
+    # Coordinator-level: not any one team's tool, purely a diagnostic for verifying push
+    # actually reaches a device end to end.
+    ops_tools["send_test_push"] = Tool(
+        "send_test_push",
+        "Send a test push notification to every device with push notifications enabled, to "
+        "verify the connection actually works. Read-only aside from the notification itself "
+        "— changes no persisted state.",
+        Tier.TIER_1, _send_test_push,
+    )
+except Exception:
+    pass  # Push notifications unavailable — Jarvis continues without them
+
 try:
     from network_tools import (
         ping_sweep, arp_table_snapshot, check_latency, bandwidth_sample,

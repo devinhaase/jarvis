@@ -1,11 +1,11 @@
 ---
 name: System Health Check
-status: proposed
+status: active
 tier: TIER_1
 team: it
 version: 2
 created_at: 1786204911.2639873
-updated_at: 1786204911.2639873
+updated_at: 1786205853.5241258
 success_count: 0
 fail_count: 0
 flagged: false
