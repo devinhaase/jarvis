@@ -125,6 +125,7 @@ watchers = {}        # conversation_id -> set(websocket) currently attached to i
 pending_approvals = {}    # approval_id -> asyncio.Future
 main_loop = None          # captured at startup so worker threads can schedule back onto it
 brain = None              # the one shared JarvisBrain — created in _lifespan, after main_loop exists
+mind_watchers = set()     # websockets connected to /ws/mind (Phase 8c, Living Mind — read-only observers)
 
 
 @asynccontextmanager
@@ -195,6 +196,21 @@ async def _broadcast_all(payload: dict):
             dead.append(ws)
     for ws in dead:
         _detach(ws)
+
+
+async def _broadcast_mind(payload: dict):
+    """Phase 8c — pushes a live event to every connected Living Mind observer. Separate
+    from _broadcast_all/_broadcast_watchers by design: mind_watchers is a different set of
+    sockets (read-only visualization clients, not conversation participants), and a failure
+    to reach one should never affect a real conversation turn."""
+    dead = []
+    for ws in list(mind_watchers):
+        try:
+            await ws.send_json(payload)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        mind_watchers.discard(ws)
 
 
 # ---------------------------------------------------------------------------
@@ -283,6 +299,11 @@ async def _run_turn(conversation_id: str, chat_history: list, capabilities: list
                 "type": "tool_status", "conversation_id": conversation_id,
                 "event": payload.get("event"), "data": payload.get("data"),
             })
+            if payload.get("event") == "tools_starting":
+                # Phase 8c: pulse the corresponding tool node(s) in the Living Mind view the
+                # moment execution actually begins — same signal the conversation GUI uses,
+                # just fanned out to a second, independent set of observers.
+                await _broadcast_mind({"type": "tool_fired", "tools": payload.get("data") or []})
         elif kind == "chunk":
             await _broadcast_watchers(conversation_id, {
                 "type": "stream_chunk", "conversation_id": conversation_id, "text": payload
@@ -641,6 +662,13 @@ async def websocket_endpoint(websocket: WebSocket):
             if assistant_text:
                 assistant_msg_id = store.add_message(conv_id, "assistant", assistant_text, source="text")
                 asyncio.create_task(_embed_message_background(assistant_msg_id, conv_id, assistant_text))
+                # Phase 8c: pulse the Working Memory region — a new turn just landed in
+                # long-term storage, whether or not anyone's currently watching mind.html.
+                conv_meta = store.get_conversation(conv_id)
+                asyncio.create_task(_broadcast_mind({
+                    "type": "memory_pulse", "conversation_id": conv_id,
+                    "title": conv_meta.get("title") if conv_meta else None,
+                }))
 
             await _broadcast_watchers(conv_id, {
                 "type": "stream_end", "conversation_id": conv_id,
@@ -667,6 +695,82 @@ def _detach_from_current(websocket):
         watchers[cid].discard(websocket)
         if not watchers[cid]:
             del watchers[cid]
+
+
+# ---------------------------------------------------------------------------
+# Living Mind — read-only observer socket (Phase 8c)
+# ---------------------------------------------------------------------------
+# Deliberately separate from /ws rather than piggybacked onto it: /ws is a conversation
+# participant's connection (it can send messages, switch conversations, request approvals);
+# /ws/mind only ever receives a snapshot plus live pulse events. Keeping them apart means a
+# bug in one protocol can't leak into the other, and a mind.html tab left open forever is
+# never mistaken for an idle conversation. Still goes through the same device-token
+# handshake and the same auth rate limiter as /ws — tool names and conversation titles
+# aren't secrets on the level of a credential, but there's no reason to expose them to an
+# unauthenticated LAN connection either when the existing device-auth machinery is right
+# there.
+@app.websocket("/ws/mind")
+async def mind_websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+
+    try:
+        hello = await asyncio.wait_for(websocket.receive_json(), timeout=15)
+    except Exception:
+        await websocket.close(code=4000, reason="Expected a hello handshake within 15s")
+        return
+    if hello.get("type") != "hello":
+        await websocket.close(code=4000, reason="First message must be type=hello")
+        return
+
+    device_id = hello.get("device_id", "")
+    token = hello.get("token", "")
+    client_host = websocket.client.host if websocket.client else "unknown"
+
+    locked_until = _auth_limiter.is_locked(client_host)
+    if locked_until:
+        wait_s = int(locked_until - time.time())
+        await websocket.send_json({"type": "error", "message": f"Too many failed auth attempts. Try again in {wait_s}s."})
+        await websocket.close(code=4429, reason="Rate limited")
+        return
+
+    if registry.validate(device_id, token) is None:
+        _auth_limiter.record_failure(client_host)
+        await websocket.send_json({"type": "error", "message": "Unknown device or invalid token."})
+        await websocket.close(code=4001, reason="Unauthorized")
+        return
+    _auth_limiter.record_success(client_host)
+
+    mind_watchers.add(websocket)
+    try:
+        from mind_graph import build_snapshot
+        snapshot = await asyncio.to_thread(build_snapshot)
+        await websocket.send_json({"type": "snapshot", **snapshot})
+
+        while True:
+            # Nothing meaningful for this client to send us — just keep the connection open
+            # and let a disconnect raise, same idle-read pattern the rest of this endpoint
+            # family uses. A client-sent "refresh" requests a fresh snapshot on demand
+            # (e.g. after the tab was backgrounded a while and might have missed pulses).
+            msg = await websocket.receive_json()
+            if msg.get("type") == "refresh":
+                snapshot = await asyncio.to_thread(build_snapshot)
+                await websocket.send_json({"type": "snapshot", **snapshot})
+    except WebSocketDisconnect:
+        pass
+    finally:
+        mind_watchers.discard(websocket)
+
+
+@app.get("/mind")
+async def mind_page():
+    """Serves webapp/mind.html directly, so the Living Mind view has a clean URL
+    (/mind) instead of relying on StaticFiles' extension-based fallback."""
+    from fastapi.responses import FileResponse
+    path = os.path.join(WEBAPP_DIR, "mind.html")
+    if not os.path.exists(path):
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse("mind.html not found.", status_code=404)
+    return FileResponse(path)
 
 
 @app.get("/gui-config")

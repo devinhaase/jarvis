@@ -532,6 +532,48 @@ class ConversationStore:
             })
         return results
 
+    def get_conversation_centroids(self, conversation_ids: list = None) -> dict:
+        """Returns {conversation_id: centroid_vector} — the mean of every embedded message's
+        vector within that conversation. Used by mind_graph.py (Phase 8c) to draw semantic
+        similarity edges between whole conversations for the Living Mind visualizer, without
+        needing a new embeddings table or an extra Ollama call — it's just an average over
+        vectors that are already stored. A conversation with zero embedded messages simply
+        doesn't appear in the result (nothing to average), same "degrades gracefully, never
+        raises" convention as the rest of this module's embedding-dependent methods."""
+        with self._lock:
+            if conversation_ids:
+                placeholders = ",".join("?" * len(conversation_ids))
+                rows = self._conn.execute(
+                    f"SELECT conversation_id, embedding FROM message_embeddings "
+                    f"WHERE conversation_id IN ({placeholders})",
+                    conversation_ids
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT conversation_id, embedding FROM message_embeddings"
+                ).fetchall()
+
+        sums, counts = {}, {}
+        for row in rows:
+            try:
+                vec = json.loads(row["embedding"])
+            except (json.JSONDecodeError, TypeError):
+                continue
+            cid = row["conversation_id"]
+            if cid not in sums:
+                sums[cid] = [0.0] * len(vec)
+                counts[cid] = 0
+            if len(vec) != len(sums[cid]):
+                continue  # embedding model changed dimensionality mid-project — skip, don't crash
+            for i, v in enumerate(vec):
+                sums[cid][i] += v
+            counts[cid] += 1
+
+        return {
+            cid: [x / counts[cid] for x in vec_sum]
+            for cid, vec_sum in sums.items() if counts[cid] > 0
+        }
+
     # ---------------------------------------------------------------- migration --
     def _migrate_legacy_sessions(self):
         """One-time import of data/sessions/*.json (Phase 2d flat-file format) so nothing

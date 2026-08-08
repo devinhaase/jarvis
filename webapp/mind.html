@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jarvis — Living Mind</title>
+<link rel="stylesheet" href="/mind.css">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#05050a">
+<script type="importmap">
+{ "imports": { "three": "/vendor/three.module.js" } }
+</script>
+</head>
+<body>
+<canvas id="scene"></canvas>
+
+<div id="overlay">
+  <div id="topBar">
+    <a id="backLink" href="/" title="Back to chat">&larr;</a>
+    <span id="title">JARVIS <span id="titleDim">— Living Mind</span></span>
+    <span id="connStatus" class="conn-status offline">connecting…</span>
+    <button id="refreshBtn" title="Re-fetch the full graph">&#8635;</button>
+  </div>
+
+  <div id="legend">
+    <div class="legend-row"><span class="swatch" style="background:#e8e8f0"></span>Core</div>
+    <div class="legend-row"><span class="swatch" style="background:#0a84ff"></span>General</div>
+    <div class="legend-row"><span class="swatch" style="background:#30d158"></span>Defense</div>
+    <div class="legend-row"><span class="swatch" style="background:#ff453a"></span>Offense</div>
+    <div class="legend-row"><span class="swatch" style="background:#bf5af2"></span>Practice</div>
+    <div class="legend-row"><span class="swatch" style="background:#ffd60a"></span>Working Memory</div>
+    <div class="legend-row dim">semantic links glow between related memories</div>
+  </div>
+
+  <div id="stats"></div>
+
+  <div id="infoPanel" class="hidden">
+    <div id="infoTitle"></div>
+    <div id="infoBody"></div>
+  </div>
+</div>
+
+<script type="module" src="/mind.js"></script>
+</body>
+</html>
