@@ -270,6 +270,26 @@ except Exception:
     pass  # Team board unavailable — Jarvis continues without it
 
 try:
+    from obsidian_tools import (
+        list_vault_structure, read_note, search_vault, create_note, append_note,
+        overwrite_note, delete_note, index_vault_into_memory,
+    )
+
+    obsidian_tools_reg = {
+        "list_vault_structure": Tool("list_vault_structure", "List your Obsidian vault's folder structure and notes per folder", Tier.TIER_1, list_vault_structure, team="personal_assistant"),
+        "read_note": Tool("read_note", "Read a note from your Obsidian vault by its path", Tier.TIER_1, read_note, team="personal_assistant"),
+        "search_vault": Tool("search_vault", "Keyword search across every note in your Obsidian vault", Tier.TIER_1, search_vault, team="personal_assistant"),
+        "create_note": Tool("create_note", "Create a new note in your Obsidian vault with proper frontmatter/tags — refuses if a note already exists at that path", Tier.TIER_2, create_note, team="personal_assistant"),
+        "append_note": Tool("append_note", "Append to an existing note (or today's daily note if no path given, auto-created from the daily template)", Tier.TIER_2, append_note, team="personal_assistant"),
+        "overwrite_note": Tool("overwrite_note", "Replace an EXISTING note's entire content — never touches your notes without explicit confirmation (Tier 4)", Tier.TIER_4, overwrite_note, team="personal_assistant"),
+        "delete_note": Tool("delete_note", "Delete a note from your vault — never without explicit confirmation (Tier 4)", Tier.TIER_4, delete_note, team="personal_assistant"),
+        "index_vault_into_memory": Tool("index_vault_into_memory", "Re-index every vault note into semantic search, so vault knowledge surfaces alongside conversation history", Tier.TIER_2, index_vault_into_memory, team="personal_assistant"),
+    }
+    assistant_tools = {**assistant_tools, **obsidian_tools_reg}
+except Exception as _obsidian_err:
+    pass  # Obsidian tools unavailable — Jarvis continues without them
+
+try:
     from network_tools import (
         ping_sweep, arp_table_snapshot, check_latency, bandwidth_sample,
         check_wan_status, diagnose_connectivity,
@@ -448,6 +468,15 @@ REQUIRES_CAPABILITY = {
     "write_local_file": "filesystem",
     "move_or_rename_path": "filesystem",
     "run_self_audit": "filesystem",  # shells to git ls-files, reads devices.json
+    # Obsidian vault tools (Phase 6) — reach the server host's local vault directory.
+    "list_vault_structure": "filesystem",
+    "read_note": "filesystem",
+    "search_vault": "filesystem",
+    "create_note": "filesystem",
+    "append_note": "filesystem",
+    "overwrite_note": "filesystem",
+    "delete_note": "filesystem",
+    "index_vault_into_memory": "filesystem",
     # Network team tools (Phase 4) — all reach the local network the server sits on.
     "ping_sweep": "filesystem",
     "check_latency": "filesystem",          # pings from wherever the server host actually is
