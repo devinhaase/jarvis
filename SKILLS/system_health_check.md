@@ -1,22 +1,22 @@
 ---
-name: system_health_check
+name: System Health Check
 status: proposed
 tier: TIER_1
 team: it
-version: 1
-created_at: 1786201831.688533
-updated_at: 1786201831.688533
+version: 2
+created_at: 1786204911.2639873
+updated_at: 1786204911.2639873
 success_count: 0
 fail_count: 0
 flagged: false
 recent_outcomes: 
-tools: check_system_health, scan_local_logs
+tools: scan_local_logs, arm_kill_switch
 ---
 
 ## When to use
 
-When identifying system issues or monitoring system health, check CPU usage and scan Windows event logs for errors
+routine system status verification or pre-procedure checks
 
 ## Steps
 
-1. 1. Check system CPU usage using check_system_health. 2. Scan Windows event logs for errors using scan_local_logs.
+1. 1. Scan local logs, 2. Arm kill switch, 3. Disarm kill switch to proceed

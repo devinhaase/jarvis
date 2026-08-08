@@ -14,7 +14,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #212123;
     --bg-sidebar: #18181a;
     --bg-bubble-user: #0a84ff;
@@ -27,6 +27,34 @@
     --danger: #ff6b6f;
     --hover: #2c2c2f;
   }
+}
+
+/* Phase 6 item 5 — explicit toggle overrides OS preference in either direction. */
+:root[data-theme="dark"] {
+  --bg: #212123;
+  --bg-sidebar: #18181a;
+  --bg-bubble-user: #0a84ff;
+  --bg-bubble-assistant: #303033;
+  --text: #ececee;
+  --text-dim: #96969e;
+  --text-on-user: #ffffff;
+  --border: #333336;
+  --accent: #3ea6ff;
+  --danger: #ff6b6f;
+  --hover: #2c2c2f;
+}
+:root[data-theme="light"] {
+  --bg: #ffffff;
+  --bg-sidebar: #f7f7f8;
+  --bg-bubble-user: #0a84ff;
+  --bg-bubble-assistant: #f0f0f2;
+  --text: #1a1a1e;
+  --text-dim: #6b6b76;
+  --text-on-user: #ffffff;
+  --border: #e4e4e8;
+  --accent: #0a84ff;
+  --danger: #e5484d;
+  --hover: #ececef;
 }
 
 * { box-sizing: border-box; }
@@ -588,6 +616,55 @@ html, body {
   display: flex;
   gap: 6px;
   margin-top: 6px;
+}
+
+/* Phase 6 item 5 — integration connection-status strip (Obsidian/Gmail/Calendar/Drive) */
+.integration-status-panel {
+  display: flex;
+  gap: 10px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+.integration-dot {
+  opacity: 0.35;
+  filter: grayscale(1);
+  cursor: default;
+  transition: opacity 0.15s ease;
+}
+.integration-dot.connected {
+  opacity: 1;
+  filter: none;
+}
+
+/* Pending-skill count badge on the Skills button — visible without opening the modal. */
+.pending-badge {
+  display: inline-block;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  margin-left: 5px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 10px;
+  line-height: 15px;
+  text-align: center;
+  font-weight: 700;
+}
+.pending-badge.hidden { display: none; }
+
+/* Persistent per-message team badge (Phase 4 routing became visible-but-transient last
+   pass; Phase 6 item 5 makes it stick to the message itself, visible when scrolling back). */
+.team-badge {
+  display: inline-block;
+  font-size: 10.5px;
+  padding: 1px 8px;
+  margin-bottom: 4px;
+  border-radius: 999px;
+  background: var(--hover);
+  color: var(--text-dim);
+  font-weight: 600;
 }
 
 #projectNameInput, .move-list {

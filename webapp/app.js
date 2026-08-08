@@ -9,6 +9,7 @@ const els = {
   sidebarToggle: $("#sidebarToggle"),
   sidebarOverlay: $("#sidebarOverlay"),
   newConvBtn: $("#newConvBtn"),
+  themeToggleBtn: $("#themeToggleBtn"),
   searchInput: $("#searchInput"),
   convList: $("#convList"),
   convSectionLabel: $("#convSectionLabel"),
@@ -141,6 +142,8 @@ function handleServerMessage(msg) {
       refreshProjectList();
       refreshConversationList();
       loadConversationMessages(state.conversationId);
+      send({ type: "get_integration_status" });
+      send({ type: "list_skills" });
       break;
 
     case "conversation_list":
@@ -221,6 +224,7 @@ function handleServerMessage(msg) {
     case "skill_list":
       state.skills = msg.skills;
       renderSkillsModal(state.skills);
+      updateSkillsPendingBadge();
       break;
 
     case "skill_updated":
@@ -228,7 +232,14 @@ function handleServerMessage(msg) {
         const i = state.skills.findIndex(s => s.name === msg.skill.name);
         if (i >= 0) state.skills[i] = msg.skill; else state.skills.push(msg.skill);
         renderSkillsModal(state.skills);
+      } else {
+        state.skills = [msg.skill];
       }
+      updateSkillsPendingBadge();
+      break;
+
+    case "integration_status":
+      renderIntegrationStatus(msg);
       break;
 
     case "user_message":
@@ -259,6 +270,10 @@ function handleServerMessage(msg) {
         const names = msg.data.teams.map(k => TEAM_LABEL[k] || k).join(" → ");
         const how = msg.data.explicit ? "asked directly" : "routed";
         appendToolNote(`${icons} ${names} (${how})`, "team-note");
+        // Phase 6 item 5: remembered so the NEXT assistant bubble (about to start
+        // streaming) gets a persistent badge, not just this transient note — the note
+        // scrolls away, the badge stays attached to the message itself.
+        state.pendingTeamBadge = { teams: msg.data.teams };
       } else if (msg.event === "team_active") {
         appendToolNote(`${TEAM_ICON[msg.data.team] || "🤖"} ${TEAM_LABEL[msg.data.team] || msg.data.team} team working…`, "team-note");
       } else if (msg.event === "team_handoff_gate") {
@@ -659,6 +674,27 @@ function renderTeamsModal(teamList) {
 }
 
 // ---------------------------------------------------------------------------
+// Integration status panel (Phase 6 item 5) — 4 dots in the sidebar footer showing
+// whether Obsidian/Gmail/Calendar/Drive are actually reachable right now. Fetched once
+// on "ready" (see handleServerMessage) rather than polled — these are slow-changing
+// (you connect Google once, then it's connected for weeks), so there's no live-update
+// path here; reconnecting the websocket (e.g. server restart) re-fetches it for free.
+// ---------------------------------------------------------------------------
+
+function renderIntegrationStatus(status) {
+  const dots = {
+    statusDotObsidian: status.obsidian,
+    statusDotGmail: status.gmail,
+    statusDotCalendar: status.calendar,
+    statusDotDrive: status.drive,
+  };
+  for (const [id, connected] of Object.entries(dots)) {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle("connected", !!connected);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Skill review queue (Phase 5) — proposed skills need Devin's explicit approve/edit/
 // reject before they're eligible to run; this panel is the only client-facing path to
 // those actions, mirroring the server's own "only a connected device can trigger this"
@@ -671,6 +707,14 @@ els.skillsBtn.addEventListener("click", () => {
   els.skillsModal.classList.remove("hidden");
 });
 els.skillsCloseBtn.addEventListener("click", () => els.skillsModal.classList.add("hidden"));
+
+function updateSkillsPendingBadge() {
+  const badge = document.getElementById("skillsPendingBadge");
+  if (!badge) return;
+  const n = (state.skills || []).filter(s => s.status === "proposed").length;
+  badge.textContent = String(n);
+  badge.classList.toggle("hidden", n === 0);
+}
 
 const SKILL_STATUS_ORDER = ["proposed", "active", "disabled", "rejected"];
 const SKILL_STATUS_LABEL = {
@@ -864,8 +908,14 @@ function appendUserBubble(text, source) {
   scrollToBottom();
 }
 
-function appendAssistantBubble(text) {
+function appendAssistantBubble(text, isLive = true) {
   clearEmptyState();
+  // isLive=false means this is a historical reload (renderMessages) — team routing is
+  // only tracked for the live session, not persisted per-message, so a reloaded
+  // conversation deliberately shows no badge rather than a stale or wrong one. A real
+  // scope boundary, not an oversight: persisting per-message team attribution would need
+  // a schema change this pass didn't need to make.
+  if (isLive) _consumePendingTeamBadge();
   const row = document.createElement("div");
   row.className = "msg-row assistant";
   const bubble = document.createElement("div");
@@ -885,9 +935,27 @@ function appendToolNote(text, extraClass) {
   scrollToBottom();
 }
 
+function _consumePendingTeamBadge() {
+  // A separate block-level element preceding the message row, same flat-list-of-elements
+  // pattern appendToolNote() already uses, rather than nested inside the row's flex layout
+  // (which is flex-direction: row — a badge inserted there would sit beside the bubble,
+  // not above it).
+  if (!state.pendingTeamBadge) return;
+  clearEmptyState();
+  const badge = document.createElement("div");
+  badge.className = "team-badge";
+  badge.style.marginLeft = "24px";
+  badge.textContent = state.pendingTeamBadge.teams
+    .map(k => `${TEAM_ICON[k] || "🤖"} ${TEAM_LABEL[k] || k}`)
+    .join(" → ");
+  els.messages.appendChild(badge);
+  state.pendingTeamBadge = null;
+}
+
 function appendStreamChunk(text) {
   clearEmptyState();
   if (!state.streamingEl) {
+    _consumePendingTeamBadge();
     const row = document.createElement("div");
     row.className = "msg-row assistant";
     const bubble = document.createElement("div");
@@ -1227,6 +1295,34 @@ function closeSidebarOnMobile() {
 }
 
 els.newConvBtn.addEventListener("click", newConversation);
+
+// ---------------------------------------------------------------------------
+// Theme toggle (Phase 6 item 5) — cycles light/dark/system. "system" is the absence of
+// a data-theme attribute (style.css's prefers-color-scheme media query decides); the two
+// explicit states override it. Persisted so a reload doesn't flash back to system default.
+// ---------------------------------------------------------------------------
+
+const THEME_CYCLE = ["system", "dark", "light"];
+const THEME_ICON = { system: "🌗", dark: "🌙", light: "☀" };
+
+function applyTheme(theme) {
+  if (theme === "system") {
+    document.documentElement.removeAttribute("data-theme");
+  } else {
+    document.documentElement.setAttribute("data-theme", theme);
+  }
+  els.themeToggleBtn.textContent = THEME_ICON[theme] || THEME_ICON.system;
+  els.themeToggleBtn.title = `Theme: ${theme} (click to change)`;
+}
+
+applyTheme(localStorage.getItem("jarvis_theme") || "system");
+
+els.themeToggleBtn.addEventListener("click", () => {
+  const current = localStorage.getItem("jarvis_theme") || "system";
+  const next = THEME_CYCLE[(THEME_CYCLE.indexOf(current) + 1) % THEME_CYCLE.length];
+  localStorage.setItem("jarvis_theme", next);
+  applyTheme(next);
+});
 
 // ---------------------------------------------------------------------------
 // Export

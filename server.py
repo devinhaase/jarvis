@@ -296,6 +296,28 @@ def _team_catalog() -> list:
     ]
 
 
+def _integration_status() -> dict:
+    """Phase 6 item 5: the GUI's 4 connection dots (Obsidian/Gmail/Calendar/Drive). Cheap,
+    read-only checks only — a directory-exists check for Obsidian, the same encrypted-token
+    connection_status() google_tools.py/tools.py already use for Google, so this never opens
+    a new network connection or triggers an OAuth flow on its own."""
+    import obsidian_tools
+    obsidian_connected = os.path.isdir(obsidian_tools._vault_root())
+
+    try:
+        import google_auth
+        g = google_auth.connection_status()
+    except Exception:
+        g = {"connected": False, "gmail": False, "gmail_compose": False, "calendar": False, "drive": False}
+
+    return {
+        "obsidian": obsidian_connected,
+        "gmail": bool(g.get("gmail")),
+        "calendar": bool(g.get("calendar")),
+        "drive": bool(g.get("drive")),
+    }
+
+
 def _tool_catalog() -> list:
     """Everything Jarvis can do, for the GUI's Tools panel — read-only, no secrets, just
     what's already visible in the system prompt anyway (get_tool_descriptions() in llm.py)."""
@@ -649,6 +671,10 @@ async def websocket_endpoint(websocket: WebSocket):
 
             if mtype == "list_teams":
                 await websocket.send_json({"type": "team_list", "teams": _team_catalog()})
+                continue
+
+            if mtype == "get_integration_status":
+                await websocket.send_json({"type": "integration_status", **_integration_status()})
                 continue
 
             # ------------------------------------------------------------ Phase 5: skill review queue --
