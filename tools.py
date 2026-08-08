@@ -31,18 +31,22 @@ class Tool:
         return self.func(*args, **kwargs)
 
 import os
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
 
 # --- Real Assistant Tools ---
 def read_recent_emails(max_results=5):
+    # Phase 6 item 4: migrated off a direct plain token.json read onto google_auth.py's
+    # shared, encrypted credential store — same one google_tools.py's newer Gmail/
+    # Calendar/Drive functions use, so there's exactly one Google auth path in this
+    # codebase, not two diverging ones.
     try:
-        if not os.path.exists('token.json'):
-            return "Error: token.json not found. Please authenticate first."
-            
-        creds = Credentials.from_authorized_user_file('token.json', ['https://www.googleapis.com/auth/gmail.readonly'])
+        import google_auth
+        from googleapiclient.discovery import build
+
+        creds = google_auth.get_credentials()
+        if creds is None:
+            return "Error: Google account not connected. Run google_auth_setup.py once to connect it."
         service = build('gmail', 'v1', credentials=creds)
-        
+
         results = service.users().messages().list(userId='me', labelIds=['INBOX', 'UNREAD'], maxResults=max_results).execute()
         messages = results.get('messages', [])
 
@@ -288,6 +292,37 @@ try:
     assistant_tools = {**assistant_tools, **obsidian_tools_reg}
 except Exception as _obsidian_err:
     pass  # Obsidian tools unavailable — Jarvis continues without them
+
+# --- Google integration (Phase 6 item 4) — narrowest OAuth scopes that cover this, see
+# google_auth.py's docstring. Sending/deleting/modifying-existing always Tier 4 regardless
+# of what the OAuth scope technically permits — the tier gate is the actual enforcement.
+try:
+    from google_tools import (
+        search_emails, read_email, draft_email, send_email,
+        list_calendar_events, create_calendar_event, update_calendar_event, delete_calendar_event,
+        search_drive_files, read_drive_file, create_drive_file, update_drive_file, delete_drive_file,
+        google_connection_status,
+    )
+
+    google_tools_reg = {
+        "search_emails": Tool("search_emails", "Search Gmail using real Gmail search syntax (e.g. 'from:x is:unread')", Tier.TIER_1, search_emails, team="personal_assistant"),
+        "read_email": Tool("read_email", "Read one email's full body by message id", Tier.TIER_1, read_email, team="personal_assistant"),
+        "draft_email": Tool("draft_email", "Create a Gmail draft — does NOT send it", Tier.TIER_2, draft_email, team="personal_assistant"),
+        "send_email": Tool("send_email", "Send an email (a draft or composed directly) — ALWAYS requires explicit confirmation, never sends autonomously", Tier.TIER_4, send_email, team="personal_assistant"),
+        "list_calendar_events": Tool("list_calendar_events", "List upcoming Calendar events", Tier.TIER_1, list_calendar_events, team="personal_assistant"),
+        "create_calendar_event": Tool("create_calendar_event", "Create a new Calendar event", Tier.TIER_2, create_calendar_event, team="personal_assistant"),
+        "update_calendar_event": Tool("update_calendar_event", "Update an existing Calendar event's details", Tier.TIER_2, update_calendar_event, team="personal_assistant"),
+        "delete_calendar_event": Tool("delete_calendar_event", "Delete a Calendar event — requires explicit confirmation every time", Tier.TIER_4, delete_calendar_event, team="personal_assistant"),
+        "search_drive_files": Tool("search_drive_files", "Search Drive files this app can see (files it created or you explicitly opened with it — drive.file scope)", Tier.TIER_1, search_drive_files, team="personal_assistant"),
+        "read_drive_file": Tool("read_drive_file", "Read a Drive file's content", Tier.TIER_1, read_drive_file, team="personal_assistant"),
+        "create_drive_file": Tool("create_drive_file", "Create a new file in Drive", Tier.TIER_2, create_drive_file, team="personal_assistant"),
+        "update_drive_file": Tool("update_drive_file", "Replace an EXISTING Drive file's content — requires explicit confirmation every time", Tier.TIER_4, update_drive_file, team="personal_assistant"),
+        "delete_drive_file": Tool("delete_drive_file", "Delete a Drive file — requires explicit confirmation every time", Tier.TIER_4, delete_drive_file, team="personal_assistant"),
+        "google_connection_status": Tool("google_connection_status", "Check whether Gmail/Calendar/Drive are connected and which scopes are actually granted", Tier.TIER_1, google_connection_status),
+    }
+    assistant_tools = {**assistant_tools, **google_tools_reg}
+except Exception as _google_err:
+    pass  # Google tools unavailable — Jarvis continues without them
 
 try:
     from network_tools import (

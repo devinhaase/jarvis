@@ -1,3 +1,11 @@
+# SUPERSEDED (Phase 6 item 4) — use google_auth_setup.py instead. This Phase 1 script only
+# ever requests gmail.readonly and stores the token as plain JSON at the project root;
+# google_auth_setup.py requests the full current scope set (Gmail read+compose, Calendar,
+# Drive) and stores it encrypted at data/google_token.enc. Left in place, unmodified,
+# rather than deleted — it's not wired into anything else in this codebase anymore
+# (tools.py's read_recent_emails and google_tools.py both use google_auth.py now), so
+# nothing breaks by its continued existence, but there's no reason to run it going forward.
+
 import os.path
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
