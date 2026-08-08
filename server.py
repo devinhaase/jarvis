@@ -263,6 +263,15 @@ def make_approval_fn():
     return approval_fn
 
 
+def _skill_to_dict(skill) -> dict:
+    return {
+        "name": skill.name, "status": skill.status, "tier": skill.tier, "team": skill.team,
+        "version": skill.version, "success_count": skill.success_count, "fail_count": skill.fail_count,
+        "flagged": skill.flagged, "when_to_use": skill.when_to_use, "steps": skill.steps,
+        "tools": skill.tools, "created_at": skill.created_at, "updated_at": skill.updated_at,
+    }
+
+
 def _tool_catalog() -> list:
     """Everything Jarvis can do, for the GUI's Tools panel — read-only, no secrets, just
     what's already visible in the system prompt anyway (get_tool_descriptions() in llm.py)."""
@@ -380,6 +389,28 @@ async def _maybe_autotitle(conversation_id: str):
         title = (first_user[:50] or "New conversation")
     store.rename_conversation(conversation_id, title)
     await _broadcast_all({"type": "conversation_renamed", "conversation_id": conversation_id, "title": title})
+
+
+async def _maybe_reflect(user_message: str, result: dict):
+    """Phase 5 — fire-and-forget after a non-trivial turn (see reflection.should_reflect).
+    Never touches what Devin already saw; a proposed skill (if any) just lands in SKILLS/
+    with status='proposed' for later review, same posture as _maybe_autotitle/
+    _maybe_update_summary firing after the response is already sent."""
+    from reflection import should_reflect, run_reflection
+    tools_ran = result.get("tools_ran", [])
+    denied = result.get("denied", [])
+    if not should_reflect(tools_ran, denied):
+        return
+    team_key = None
+    teams_involved = result.get("teams_involved") or []
+    if teams_involved:
+        team_key = teams_involved[-1]  # the team whose loop actually ran the tools in question
+    try:
+        await asyncio.to_thread(
+            run_reflection, brain, user_message, tools_ran, result.get("response", ""), team_key
+        )
+    except Exception as e:
+        print(f"[Server] Reflection pass failed: {e}")
 
 
 def _generate_summary_update(prior_summary: str, new_messages: list):
@@ -592,6 +623,68 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json({"type": "tool_list", "tools": _tool_catalog()})
                 continue
 
+            # ------------------------------------------------------------ Phase 5: skill review queue --
+            # Every mutating action here (approve/reject/disable/edit) is something only a
+            # connected device can trigger — same trust model as the rest of this websocket
+            # protocol. None of these paths are reachable from reflection.py or any other
+            # autonomous code; see skills.py's docstring for why that separation is load-bearing.
+            if mtype == "list_skills":
+                import skills as _skills
+                status_filter = msg.get("status")
+                await websocket.send_json({
+                    "type": "skill_list",
+                    "skills": [_skill_to_dict(s) for s in _skills.list_skills(status=status_filter)],
+                })
+                continue
+
+            if mtype == "approve_skill":
+                import skills as _skills
+                skill = _skills.approve_skill(msg.get("name", ""))
+                if skill:
+                    await _broadcast_all({"type": "skill_updated", "skill": _skill_to_dict(skill)})
+                else:
+                    await websocket.send_json({"type": "error", "message": f"No such skill: {msg.get('name')!r}"})
+                continue
+
+            if mtype == "reject_skill":
+                import skills as _skills
+                skill = _skills.reject_skill(msg.get("name", ""))
+                if skill:
+                    await _broadcast_all({"type": "skill_updated", "skill": _skill_to_dict(skill)})
+                else:
+                    await websocket.send_json({"type": "error", "message": f"No such skill: {msg.get('name')!r}"})
+                continue
+
+            if mtype == "disable_skill":
+                import skills as _skills
+                skill = _skills.disable_skill(msg.get("name", ""))
+                if skill:
+                    await _broadcast_all({"type": "skill_updated", "skill": _skill_to_dict(skill)})
+                else:
+                    await websocket.send_json({"type": "error", "message": f"No such skill: {msg.get('name')!r}"})
+                continue
+
+            if mtype == "clear_skill_flag":
+                import skills as _skills
+                skill = _skills.clear_flag(msg.get("name", ""))
+                if skill:
+                    await _broadcast_all({"type": "skill_updated", "skill": _skill_to_dict(skill)})
+                else:
+                    await websocket.send_json({"type": "error", "message": f"No such skill: {msg.get('name')!r}"})
+                continue
+
+            if mtype == "edit_skill":
+                import skills as _skills
+                skill = _skills.edit_skill(
+                    msg.get("name", ""), when_to_use=msg.get("when_to_use"),
+                    steps=msg.get("steps"), tool_calls=msg.get("tools"),
+                )
+                if skill:
+                    await _broadcast_all({"type": "skill_updated", "skill": _skill_to_dict(skill)})
+                else:
+                    await websocket.send_json({"type": "error", "message": f"No such skill: {msg.get('name')!r}"})
+                continue
+
             if mtype == "new_conversation":
                 _detach_from_current(websocket)
                 new_id = store.create_conversation(device_id=info["device_id"])
@@ -693,6 +786,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
             asyncio.create_task(_maybe_autotitle(conv_id))
             asyncio.create_task(_maybe_update_summary(conv_id))
+            asyncio.create_task(_maybe_reflect(text, result))
 
     except WebSocketDisconnect:
         pass

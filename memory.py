@@ -49,11 +49,23 @@ class Memory:
 
         return "\n".join(lines) if lines else ""
 
+    def _sync_memory_docs(self):
+        """Phase 5: keep USER.md/MEMORY.md (human-readable renderings) in step with every
+        semantic memory write. Best-effort — a rendering failure must never break the
+        actual persisted fact/preference, which is why this is separated from the json.dump
+        calls above rather than interleaved with them."""
+        try:
+            from memory_docs import regenerate
+            regenerate(self.semantic_memory)
+        except Exception:
+            pass
+
     def update_semantic(self, key: str, value):
         """Write a key/value pair into semantic memory and persist to disk."""
         self.semantic_memory[key] = value
         with open(self.semantic_file, 'w') as f:
             json.dump(self.semantic_memory, f, indent=4)
+        self._sync_memory_docs()
 
     def append_fact(self, fact: str):
         """Append a single fact string to the facts list."""
@@ -62,6 +74,7 @@ class Memory:
             facts.append(fact)
             with open(self.semantic_file, 'w') as f:
                 json.dump(self.semantic_memory, f, indent=4)
+            self._sync_memory_docs()
 
     def log_episode(self, action, result, tier):
         episode = {

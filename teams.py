@@ -32,6 +32,23 @@ class Team:
         coordinator_level = {name for name, tool in ALL_TOOLS.items() if tool.team is None}
         return owned | coordinator_level
 
+    def skills_prompt_fragment(self) -> str:
+        """Phase 5: active, non-flagged skills for this team, injected into team_context
+        (see team_router.py) as documented recipes the model can choose to follow. This is
+        a prompt hint, not a new execution path — following a skill still means emitting
+        normal [TOOL: ...] calls that go through the exact same tier/authorization/kill-
+        switch gates as if the model had thought of the sequence fresh. Returns "" (no
+        section at all) when there are no active skills yet, rather than an empty header."""
+        import skills
+        active = skills.active_skills_for_team(self.key)
+        if not active:
+            return ""
+        lines = ["LEARNED SKILLS (optional — proven multi-step patterns for this team; "
+                 "follow one if it genuinely fits, don't force it):"]
+        lines.extend(s.as_prompt_blurb() for s in active)
+        lines.append("If you follow one of these, end your response with exactly: [SKILL_USED: <name>]")
+        return "\n".join(lines)
+
 
 TEAMS = {
     "personal_assistant": Team(

@@ -33,6 +33,10 @@ const els = {
   toolsModal: $("#toolsModal"),
   toolsCloseBtn: $("#toolsCloseBtn"),
   toolsBody: $("#toolsBody"),
+  skillsBtn: $("#skillsBtn"),
+  skillsModal: $("#skillsModal"),
+  skillsCloseBtn: $("#skillsCloseBtn"),
+  skillsBody: $("#skillsBody"),
   projectModal: $("#projectModal"),
   projectModalCloseBtn: $("#projectModalCloseBtn"),
   projectNameInput: $("#projectNameInput"),
@@ -60,6 +64,7 @@ const state = {
   pendingVoiceOrigin: false,  // composer text about to be sent came from dictation
   awaitingVoiceReply: false,  // speak the next assistant reply aloud
   isRecording: false,
+  skills: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -203,6 +208,19 @@ function handleServerMessage(msg) {
 
     case "tool_list":
       renderToolsModal(msg.tools);
+      break;
+
+    case "skill_list":
+      state.skills = msg.skills;
+      renderSkillsModal(state.skills);
+      break;
+
+    case "skill_updated":
+      if (state.skills) {
+        const i = state.skills.findIndex(s => s.name === msg.skill.name);
+        if (i >= 0) state.skills[i] = msg.skill; else state.skills.push(msg.skill);
+        renderSkillsModal(state.skills);
+      }
       break;
 
     case "user_message":
@@ -568,6 +586,98 @@ function renderToolsModal(tools) {
     entry.appendChild(desc);
     els.toolsBody.appendChild(entry);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Skill review queue (Phase 5) — proposed skills need Devin's explicit approve/edit/
+// reject before they're eligible to run; this panel is the only client-facing path to
+// those actions, mirroring the server's own "only a connected device can trigger this"
+// trust model. Grouped by status so the review queue (proposed) is visually distinct
+// from what's already active, flagged, or set aside.
+// ---------------------------------------------------------------------------
+
+els.skillsBtn.addEventListener("click", () => {
+  send({ type: "list_skills" });
+  els.skillsModal.classList.remove("hidden");
+});
+els.skillsCloseBtn.addEventListener("click", () => els.skillsModal.classList.add("hidden"));
+
+const SKILL_STATUS_ORDER = ["proposed", "active", "disabled", "rejected"];
+const SKILL_STATUS_LABEL = {
+  proposed: "PROPOSED — awaiting your review", active: "ACTIVE",
+  disabled: "DISABLED", rejected: "REJECTED",
+};
+
+function renderSkillsModal(skillList) {
+  els.skillsBody.innerHTML = "";
+  if (!skillList || skillList.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "tool-desc";
+    empty.textContent = "No skills yet — Jarvis proposes one after a multi-step task that looks reusable.";
+    els.skillsBody.appendChild(empty);
+    return;
+  }
+
+  for (const statusKey of SKILL_STATUS_ORDER) {
+    const group = skillList.filter(s => s.status === statusKey);
+    if (group.length === 0) continue;
+
+    const heading = document.createElement("div");
+    heading.className = "tool-group-title";
+    heading.textContent = SKILL_STATUS_LABEL[statusKey];
+    els.skillsBody.appendChild(heading);
+
+    for (const skill of group) {
+      const entry = document.createElement("div");
+      entry.className = "tool-entry";
+
+      const nameRow = document.createElement("div");
+      const name = document.createElement("span");
+      name.className = "tool-name";
+      name.textContent = skill.name + (skill.flagged ? " ⚠" : "");
+      const tier = document.createElement("span");
+      tier.className = "tool-tier";
+      tier.textContent = `${skill.tier} · v${skill.version}`;
+      nameRow.appendChild(name);
+      nameRow.appendChild(tier);
+
+      const desc = document.createElement("div");
+      desc.className = "tool-desc";
+      desc.textContent = `${skill.when_to_use} — steps: ${skill.steps.join(" -> ")} — tools: ${skill.tools.join(", ")}`;
+
+      const stats = document.createElement("div");
+      stats.className = "tool-desc";
+      stats.textContent = `${skill.success_count} succeeded, ${skill.fail_count} failed` +
+        (skill.flagged ? " — flagged for review (failure rate spiked; still active until you decide)" : "");
+
+      entry.appendChild(nameRow);
+      entry.appendChild(desc);
+      entry.appendChild(stats);
+
+      const actions = document.createElement("div");
+      actions.className = "skill-actions";
+      if (skill.status === "proposed") {
+        actions.appendChild(skillActionBtn("Approve", () => send({ type: "approve_skill", name: skill.name })));
+        actions.appendChild(skillActionBtn("Reject", () => send({ type: "reject_skill", name: skill.name })));
+      } else if (skill.status === "active") {
+        if (skill.flagged) {
+          actions.appendChild(skillActionBtn("Clear flag", () => send({ type: "clear_skill_flag", name: skill.name })));
+        }
+        actions.appendChild(skillActionBtn("Disable", () => send({ type: "disable_skill", name: skill.name })));
+      }
+      if (actions.childElementCount > 0) entry.appendChild(actions);
+
+      els.skillsBody.appendChild(entry);
+    }
+  }
+}
+
+function skillActionBtn(label, onClick) {
+  const btn = document.createElement("button");
+  btn.className = "text-btn small";
+  btn.textContent = label;
+  btn.addEventListener("click", onClick);
+  return btn;
 }
 
 // ---------------------------------------------------------------------------

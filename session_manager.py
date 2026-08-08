@@ -221,6 +221,8 @@ class JarvisBrain:
         denied = []
         final_response = ""
         iteration = 0
+        skill_used_name = None    # Phase 5 — set if the model names a learned skill it followed
+        any_tool_failed = False   # Phase 5 — for that skill's outcome, if one was named
 
         while iteration < max_iterations:
             iteration += 1
@@ -233,6 +235,10 @@ class JarvisBrain:
             def _on_remember(m):
                 self.memory.append_fact(m.group(1))
 
+            def _on_skill_used(m):
+                nonlocal skill_used_name
+                skill_used_name = m.group(1).strip()
+
             try:
                 raw_chunks = self._brain.chat_stream(chat_history, sys_prompt)
             except Exception as e:
@@ -243,7 +249,9 @@ class JarvisBrain:
 
             collected = []
             try:
-                for visible in stream_and_filter_tags(raw_chunks, on_tool=_on_tool, on_remember=_on_remember):
+                for visible in stream_and_filter_tags(
+                    raw_chunks, on_tool=_on_tool, on_remember=_on_remember, on_skill_used=_on_skill_used
+                ):
                     if visible:
                         collected.append(visible)
                         yield ("chunk", visible)
@@ -273,6 +281,8 @@ class JarvisBrain:
                     on_status("tools_starting", [s.get("tool") for s in allowed])
 
                 tool_results = self.coordinator.run_tools(allowed, tool_subset) if allowed else ""
+                if "FAILED" in tool_results or "outside this team's scope" in tool_results:
+                    any_tool_failed = True
                 if blocked:
                     blocked_msg = "\n".join(
                         f"{b['tool']}: refused — this session's device didn't declare the "
@@ -294,6 +304,13 @@ class JarvisBrain:
                 final_response = clean_response
                 yield ("round_end", {"tools_ran": []})
                 break
+
+        if skill_used_name:
+            try:
+                import skills
+                skills.record_skill_outcome(skill_used_name, success=not any_tool_failed)
+            except Exception:
+                pass  # outcome tracking is best-effort — never let it interfere with the actual turn
 
         yield ("done", {"response": final_response, "tools_ran": tools_ran, "denied": denied})
 
