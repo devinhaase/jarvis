@@ -1,0 +1,12 @@
+{
+  "name": "Jarvis",
+  "short_name": "Jarvis",
+  "description": "Personal AI agent — chat, voice, and security specialist",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a1a1e",
+  "theme_color": "#0a84ff",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "192x192 512x512", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

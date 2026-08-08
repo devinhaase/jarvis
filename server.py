@@ -65,12 +65,15 @@ import uuid
 import asyncio
 import argparse
 import threading
+import re
+from datetime import datetime
 
 from dotenv import load_dotenv
 load_dotenv()
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from memory import Memory
 from tools import Tier, ALL_TOOLS
@@ -136,10 +139,19 @@ async def _lifespan(_app: FastAPI):
     except Exception as e:
         print(f"[Server] Defense posture monitor not started: {e}")
 
+    briefing_task = None
+    try:
+        from daily_briefing import daily_briefing_loop
+        briefing_task = asyncio.create_task(daily_briefing_loop(brain=brain, broadcast_all=_broadcast_all))
+    except Exception as e:
+        print(f"[Server] Daily briefing loop not started: {e}")
+
     yield
 
     if monitor_task:
         monitor_task.cancel()
+    if briefing_task:
+        briefing_task.cancel()
 
 
 app = FastAPI(title="Jarvis Server", lifespan=_lifespan)
@@ -309,6 +321,17 @@ def _generate_title(user_text: str, assistant_text: str):
         return None
 
 
+async def _embed_message_background(message_id: int, conversation_id: str, text: str):
+    """Fire-and-forget: compute and store a message's semantic embedding without making the
+    turn that produced it wait on an extra Ollama round trip. If Ollama/the embedding model
+    isn't available, embed_text() returns None and this just no-ops — semantic_search then
+    simply has less (or nothing) to search over, never a hard failure anywhere else."""
+    from embeddings import embed_text, EMBEDDING_MODEL
+    vector = await asyncio.to_thread(embed_text, text)
+    if vector:
+        store.add_message_embedding(message_id, conversation_id, EMBEDDING_MODEL, vector)
+
+
 async def _maybe_autotitle(conversation_id: str):
     if store.is_titled(conversation_id) or store.message_count(conversation_id) < 2:
         return
@@ -320,6 +343,45 @@ async def _maybe_autotitle(conversation_id: str):
         title = (first_user[:50] or "New conversation")
     store.rename_conversation(conversation_id, title)
     await _broadcast_all({"type": "conversation_renamed", "conversation_id": conversation_id, "title": title})
+
+
+def _generate_summary_update(prior_summary: str, new_messages: list):
+    if brain is None or brain._brain is None:
+        return None
+    from llm import stream_and_filter_tags
+    text_block = "\n".join(f"{m['role']}: {m['content'][:500]}" for m in new_messages)
+    prompt = (
+        "Update the running summary of this conversation to fold in the new messages below "
+        "— extend/revise the existing summary, don't discard it and start over. Keep it "
+        "compact (a paragraph or two): capture facts, decisions, and context that would "
+        "matter for answering future questions in this conversation, not a blow-by-blow "
+        "transcript of what was said.\n\n"
+        f"EXISTING SUMMARY:\n{prior_summary or '(none yet — this is the first summarization pass)'}\n\n"
+        f"NEW MESSAGES TO FOLD IN:\n{text_block[:6000]}"
+    )
+    try:
+        raw = "".join(brain._brain.chat_stream(
+            [{"role": "user", "content": prompt}], "You write compact, cumulative conversation summaries."
+        ))
+        return "".join(stream_and_filter_tags([raw])).strip()
+    except Exception:
+        return None
+
+
+async def _maybe_update_summary(conversation_id: str, recent_n: int = 20):
+    """Keeps a rolling summary of a conversation's older messages so get_llm_context_history
+    doesn't have to resend the entire history every turn once a conversation gets long. Only
+    does anything once there's actually a real batch of older messages to fold in — not
+    every single turn, which would mean constant extra LLM calls for one message at a time."""
+    to_summarize = store.get_messages_to_summarize(conversation_id, recent_n=recent_n)
+    if not to_summarize:
+        return
+    conv = store.get_conversation(conversation_id)
+    prior_summary = (conv or {}).get("summary") or ""
+    new_summary = await asyncio.to_thread(_generate_summary_update, prior_summary, to_summarize)
+    if new_summary:
+        through_id = to_summarize[-1]["id"]
+        store.set_conversation_summary(conversation_id, new_summary, through_id)
 
 
 # ---------------------------------------------------------------------------
@@ -403,6 +465,20 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json({
                     "type": "search_results", "query": query, "results": store.search(query)
                 })
+                continue
+
+            if mtype == "semantic_search":
+                query = msg.get("query", "")
+                from embeddings import embed_text
+                query_vec = await asyncio.to_thread(embed_text, query)
+                if query_vec is None:
+                    await websocket.send_json({
+                        "type": "search_results", "query": query, "results": [],
+                        "note": "Semantic search unavailable — Ollama or the embedding model isn't reachable right now.",
+                    })
+                else:
+                    results = await asyncio.to_thread(store.semantic_search, query_vec)
+                    await websocket.send_json({"type": "search_results", "query": query, "results": results})
                 continue
 
             if mtype == "list_projects":
@@ -533,7 +609,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 connected[websocket]["conversation_id"] = conv_id
                 watchers.setdefault(conv_id, set()).add(websocket)
 
-            store.add_message(conv_id, "user", text, source=source)
+            user_msg_id = store.add_message(conv_id, "user", text, source=source)
+            asyncio.create_task(_embed_message_background(user_msg_id, conv_id, text))
             # Excludes the sender: it already rendered its own message optimistically the
             # moment it hit send — this broadcast is only so OTHER watchers of the same
             # conversation (another tab, the voice companion) see it too.
@@ -541,12 +618,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 "type": "user_message", "conversation_id": conv_id, "text": text, "source": source
             }, exclude=websocket)
 
-            chat_history = store.get_chat_history(conv_id)
+            chat_history = store.get_llm_context_history(conv_id)
             result = await _run_turn(conv_id, chat_history, info["capabilities"])
 
             assistant_text = (result.get("response") or "").strip()
             if assistant_text:
-                store.add_message(conv_id, "assistant", assistant_text, source="text")
+                assistant_msg_id = store.add_message(conv_id, "assistant", assistant_text, source="text")
+                asyncio.create_task(_embed_message_background(assistant_msg_id, conv_id, assistant_text))
 
             await _broadcast_watchers(conv_id, {
                 "type": "stream_end", "conversation_id": conv_id,
@@ -556,6 +634,7 @@ async def websocket_endpoint(websocket: WebSocket):
             })
 
             asyncio.create_task(_maybe_autotitle(conv_id))
+            asyncio.create_task(_maybe_update_summary(conv_id))
 
     except WebSocketDisconnect:
         pass
@@ -647,6 +726,34 @@ async def transcribe(audio: UploadFile = File(...)):
         return {"text": ""}
     text = voice._stt_local_bytes(raw)
     return {"text": text or ""}
+
+
+@app.get("/export/{conversation_id}")
+async def export_conversation(conversation_id: str):
+    """Downloads a conversation as a plain markdown file — your data, in a format you can
+    actually keep, read offline, or move elsewhere. Not part of create_backup's zip (that's
+    the whole database); this is one conversation, human-readable, on demand."""
+    if not store.conversation_exists(conversation_id):
+        return Response(content="No such conversation.", status_code=404)
+
+    conv = store.get_conversation(conversation_id)
+    messages = store.get_messages(conversation_id)
+
+    lines = [f"# {conv['title']}", "", f"_Exported {datetime.now().strftime('%Y-%m-%d %H:%M')}_", ""]
+    for m in messages:
+        speaker = "**Devin**" if m["role"] == "user" else "**Jarvis**"
+        via = " _(voice)_" if m.get("source") == "voice" else ""
+        lines.append(f"{speaker}{via}:")
+        lines.append(m["content"])
+        lines.append("")
+    markdown = "\n".join(lines)
+
+    safe_title = re.sub(r'[^\w\-]+', '_', conv["title"]).strip("_")[:50] or "conversation"
+    filename = f"{safe_title}_{conversation_id[:8]}.md"
+    return Response(
+        content=markdown, media_type="text/markdown",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
 
 
 # Mounted last, deliberately — a broad "/" static mount must not shadow the more specific

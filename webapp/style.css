@@ -90,9 +90,13 @@ html, body {
 
 .search-box {
   padding: 8px 12px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
 }
 .search-box input {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 8px 10px;
   border-radius: 8px;
   border: 1px solid var(--border);
@@ -101,6 +105,7 @@ html, body {
   font-size: 13px;
 }
 .search-box input:focus { outline: 1px solid var(--accent); }
+#semanticToggle.active { color: var(--accent); background: var(--hover); }
 
 .conv-list {
   flex: 1;
@@ -193,6 +198,7 @@ html, body {
   padding: 14px 24px;
   border-bottom: 1px solid var(--border);
 }
+.header-right { margin-left: auto; }
 #convTitle {
   font-size: 15px;
   font-weight: 600;

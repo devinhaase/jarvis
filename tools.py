@@ -101,12 +101,81 @@ assistant_tools = {
     "draft_local_note": Tool("draft_local_note", "Draft a markdown note", Tier.TIER_2, mock_draft_note)
 }
 
+try:
+    from web_search import web_search as _web_search
+
+    assistant_tools["web_search"] = Tool(
+        "web_search",
+        "General-purpose web search (not security-scoped) — DuckDuckGo by default, "
+        "no API key required; uses Brave Search if BRAVE_SEARCH_API_KEY is set",
+        Tier.TIER_1, _web_search
+    )
+except Exception:
+    pass  # Web search unavailable — Jarvis continues without it
+
+try:
+    from task_manager import add_task, list_tasks, complete_task, delete_task
+
+    assistant_tools["add_task"] = Tool("add_task", "Add a task/reminder (title, optional details, optional due_date as YYYY-MM-DD)", Tier.TIER_2, add_task)
+    assistant_tools["list_tasks"] = Tool("list_tasks", "List tasks, soonest-due first — undone tasks by default, pass include_completed=true for everything", Tier.TIER_1, list_tasks)
+    assistant_tools["complete_task"] = Tool("complete_task", "Mark a task complete by its id", Tier.TIER_2, complete_task)
+    assistant_tools["delete_task"] = Tool("delete_task", "Delete a task by its id", Tier.TIER_2, delete_task)
+except Exception:
+    pass  # Task manager unavailable — Jarvis continues without it
+
 ops_tools = {
     "check_system_health": Tool("check_system_health", "Check system CPU usage", Tier.TIER_1, check_system_health),
     "scan_local_logs": Tool("scan_local_logs", "Scan Windows event logs for errors", Tier.TIER_1, scan_local_logs),
     "run_local_script": Tool("run_local_script", "Run an arbitrary local script or command", Tier.TIER_3, run_local_script),
     "error_tool": Tool("error_tool", "Forces an error for testing", Tier.TIER_1, forced_error_tool)
 }
+
+try:
+    from conversation_store import semantic_search_conversations
+
+    ops_tools["semantic_search_conversations"] = Tool(
+        "semantic_search_conversations",
+        "Search past conversations by meaning, not just keyword (complements the GUI's "
+        "keyword search) — finds conceptually related conversations even if the wording "
+        "differs entirely. Degrades gracefully if the local embedding model isn't available.",
+        Tier.TIER_1, semantic_search_conversations
+    )
+except Exception:
+    pass  # Semantic search unavailable — Jarvis continues without it
+
+try:
+    from usage_tracker import get_usage_stats
+
+    ops_tools["get_usage_stats"] = Tool(
+        "get_usage_stats",
+        "Approximate LLM token usage and cost over the last N days (default 30), broken "
+        "down by provider — always $0 on Ollama (local), only matters if a paid API is active",
+        Tier.TIER_1, get_usage_stats
+    )
+except Exception:
+    pass  # Usage tracking unavailable — Jarvis continues without it
+
+try:
+    from backup import create_backup as _create_backup
+
+    ops_tools["create_backup"] = Tool(
+        "create_backup",
+        "Create a local timestamped zip backup of data/ (conversations, memory, authorized "
+        "targets) plus .env/devices.json/credentials — never uploaded anywhere. Prunes old backups.",
+        Tier.TIER_2, _create_backup
+    )
+except Exception:
+    pass  # Backup tool unavailable — Jarvis continues without it
+
+try:
+    from file_tools import read_local_file, list_directory, write_local_file, move_or_rename_path
+
+    ops_tools["read_local_file"] = Tool("read_local_file", "Read a local text file's content (truncated to max_chars)", Tier.TIER_1, read_local_file)
+    ops_tools["list_directory"] = Tool("list_directory", "List a local directory's immediate contents (name, is_dir, size_bytes)", Tier.TIER_1, list_directory)
+    ops_tools["write_local_file"] = Tool("write_local_file", "Write or append to a local text file", Tier.TIER_2, write_local_file)
+    ops_tools["move_or_rename_path"] = Tool("move_or_rename_path", "Move or rename a local file/directory — refuses if the destination already exists", Tier.TIER_3, move_or_rename_path)
+except Exception:
+    pass  # File tools unavailable — Jarvis continues without them
 
 ALL_TOOLS = {**assistant_tools, **ops_tools}
 
@@ -261,4 +330,9 @@ REQUIRES_CAPABILITY = {
     "generate_payload": "filesystem",       # shells out to msfvenom, writes a local file
     "run_exploit_module": "filesystem",     # shells out to msfconsole, runs against the network
     "msf_module_info": "filesystem",        # shells out to msfconsole (read-only, but still local subprocess)
+    "create_backup": "filesystem",          # reads/writes local files
+    "read_local_file": "filesystem",
+    "list_directory": "filesystem",
+    "write_local_file": "filesystem",
+    "move_or_rename_path": "filesystem",
 }

@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Jarvis</title>
 <link rel="stylesheet" href="/style.css">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon.svg">
+<meta name="theme-color" content="#0a84ff">
 </head>
 <body>
 <div id="app">
@@ -19,6 +23,7 @@
 
     <div class="search-box">
       <input id="searchInput" type="text" placeholder="Search conversations…" autocomplete="off">
+      <button id="semanticToggle" class="icon-btn small" title="Toggle semantic (meaning-based) search">🧠</button>
     </div>
 
     <div class="sidebar-section">
@@ -50,6 +55,7 @@
       <span id="listeningIndicator" class="listening-indicator hidden">
         <span class="dot"></span> listening…
       </span>
+      <button id="exportBtn" class="icon-btn small header-right" title="Export this conversation as markdown">⬇</button>
     </header>
 
     <div id="messages" class="messages"></div>

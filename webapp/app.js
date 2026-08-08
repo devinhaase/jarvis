@@ -233,6 +233,7 @@ function handleServerMessage(msg) {
     case "stream_end":
       if (msg.conversation_id === state.conversationId) finishStream(msg);
       refreshConversationList();
+      if (msg.full_text) notifyIfHidden("Jarvis", msg.full_text);
       break;
 
     case "voice_status":
@@ -810,18 +811,32 @@ els.convTitle.addEventListener("keydown", (e) => {
 // ---------------------------------------------------------------------------
 
 let searchDebounce = null;
+state.semanticSearch = false;
+
+function runSearch() {
+  const q = els.searchInput.value.trim();
+  if (!q) {
+    state.searchMode = false;
+    renderConvList();
+    return;
+  }
+  state.searchMode = true;
+  send({ type: state.semanticSearch ? "semantic_search" : "search_conversations", query: q });
+}
+
 els.searchInput.addEventListener("input", () => {
   clearTimeout(searchDebounce);
-  const q = els.searchInput.value.trim();
-  searchDebounce = setTimeout(() => {
-    if (!q) {
-      state.searchMode = false;
-      renderConvList();
-      return;
-    }
-    state.searchMode = true;
-    send({ type: "search_conversations", query: q });
-  }, 250);
+  searchDebounce = setTimeout(runSearch, 250);
+});
+
+const semanticToggleEl = document.getElementById("semanticToggle");
+semanticToggleEl.addEventListener("click", () => {
+  state.semanticSearch = !state.semanticSearch;
+  semanticToggleEl.classList.toggle("active", state.semanticSearch);
+  semanticToggleEl.title = state.semanticSearch
+    ? "Semantic search ON (searching by meaning) — click for keyword search"
+    : "Toggle semantic (meaning-based) search";
+  if (els.searchInput.value.trim()) runSearch();
 });
 
 // ---------------------------------------------------------------------------
@@ -1032,6 +1047,44 @@ function closeSidebarOnMobile() {
 }
 
 els.newConvBtn.addEventListener("click", newConversation);
+
+// ---------------------------------------------------------------------------
+// Export
+// ---------------------------------------------------------------------------
+
+document.getElementById("exportBtn").addEventListener("click", () => {
+  if (!state.conversationId) return;
+  const a = document.createElement("a");
+  a.href = `/export/${state.conversationId}`;
+  a.download = "";  // filename comes from the server's Content-Disposition header
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+});
+
+// ---------------------------------------------------------------------------
+// Browser notifications + PWA installability
+// ---------------------------------------------------------------------------
+// Foreground-only: this requires the tab to still be open (just not focused/visible), not
+// a true background/mobile push — that would need a push server and a subscription flow,
+// a materially bigger undertaking than "notify me while I'm on another tab."
+
+if ("Notification" in window && Notification.permission === "default") {
+  Notification.requestPermission().catch(() => {});
+}
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js").catch(() => {});
+}
+
+function notifyIfHidden(title, body) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  if (!document.hidden) return;  // tab is focused and visible — no need to also notify
+  try {
+    const n = new Notification(title, { body: body.slice(0, 200), icon: "/icon.svg" });
+    n.onclick = () => { window.focus(); n.close(); };
+  } catch (e) { /* best-effort — a notification failing shouldn't break anything else */ }
+}
 
 // ---------------------------------------------------------------------------
 boot();

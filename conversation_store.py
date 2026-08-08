@@ -62,6 +62,14 @@ CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
     INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
 END;
 
+CREATE TABLE IF NOT EXISTS message_embeddings (
+    message_id INTEGER PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    model TEXT NOT NULL,
+    embedding TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_embeddings_conv ON message_embeddings(conversation_id);
+
 CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -116,6 +124,9 @@ class ConversationStore:
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
         _ensure_column(self._conn, "conversations", "project_id", "TEXT")
+        _ensure_column(self._conn, "conversations", "summary", "TEXT")
+        _ensure_column(self._conn, "conversations", "summary_updated_at", "REAL")
+        _ensure_column(self._conn, "conversations", "summary_through_message_id", "INTEGER DEFAULT 0")
         self._conn.commit()
         self._migrate_legacy_sessions()
 
@@ -195,24 +206,30 @@ class ConversationStore:
     def get_conversation(self, conversation_id: str):
         with self._lock:
             row = self._conn.execute(
-                "SELECT id, title, created_at, updated_at, project_id FROM conversations WHERE id=?",
+                "SELECT id, title, created_at, updated_at, project_id, summary, "
+                "summary_updated_at, summary_through_message_id FROM conversations WHERE id=?",
                 (conversation_id,)
             ).fetchone()
         return dict(row) if row else None
 
     # ------------------------------------------------------------------ messages --
-    def add_message(self, conversation_id: str, role: str, content: str, source: str = "text"):
+    def add_message(self, conversation_id: str, role: str, content: str, source: str = "text") -> int:
+        """Returns the new message's row id — used by callers that background-populate a
+        semantic embedding for it afterward (see server.py) without blocking the turn on
+        an extra Ollama call before the user's message is even considered saved."""
         now = time.time()
         with self._lock:
-            self._conn.execute(
+            cur = self._conn.execute(
                 "INSERT INTO messages (conversation_id, role, content, source, created_at) "
                 "VALUES (?,?,?,?,?)",
                 (conversation_id, role, content, source, now)
             )
+            message_id = cur.lastrowid
             self._conn.execute(
                 "UPDATE conversations SET updated_at=? WHERE id=?", (now, conversation_id)
             )
             self._conn.commit()
+        return message_id
 
     def get_messages(self, conversation_id: str) -> list:
         with self._lock:
@@ -234,6 +251,61 @@ class ConversationStore:
                 "SELECT COUNT(*) AS n FROM messages WHERE conversation_id=?", (conversation_id,)
             ).fetchone()
         return row["n"] if row else 0
+
+    # ---------------------------------------------------------- context / summarization --
+    # A long conversation sent to the LLM in full, every turn, both costs more (every token
+    # of every past turn, resent every time) and thins out what the model actually attends
+    # to. Once a conversation crosses `threshold` messages, get_llm_context_history()
+    # returns a rolling summary of the older parts + the last `recent_n` raw messages
+    # instead of everything — the summary itself is generated/extended incrementally by
+    # server.py's _maybe_update_summary(), not by this module (which has no LLM access).
+
+    def get_llm_context_history(self, conversation_id: str, recent_n: int = 20, threshold: int = 30) -> list:
+        total = self.message_count(conversation_id)
+        if total <= threshold:
+            return self.get_chat_history(conversation_id)
+
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT role, content FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT ?",
+                (conversation_id, recent_n)
+            ).fetchall()
+        recent = [{"role": r["role"], "content": r["content"]} for r in reversed(rows)]
+
+        conv = self.get_conversation(conversation_id)
+        summary = (conv or {}).get("summary")
+        if summary:
+            return [{
+                "role": "user",
+                "content": f"[SYSTEM] Summary of earlier parts of this conversation (for context — "
+                           f"the raw messages below are the most recent ones):\n{summary}"
+            }] + recent
+        return recent  # over threshold but no summary exists yet — falls back to just-recent
+                        # until the next turn's background summarization catches up
+
+    def get_messages_to_summarize(self, conversation_id: str, recent_n: int = 20) -> list:
+        """Messages older than the most recent `recent_n` AND not yet folded into the
+        stored summary — exactly the delta the next summarization pass needs to cover.
+        Returns [] when there's nothing new old enough to summarize yet."""
+        conv = self.get_conversation(conversation_id)
+        through_id = (conv or {}).get("summary_through_message_id") or 0
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, role, content FROM messages WHERE conversation_id=? AND id > ? ORDER BY id ASC",
+                (conversation_id, through_id)
+            ).fetchall()
+        all_new = [dict(r) for r in rows]
+        if len(all_new) <= recent_n:
+            return []
+        return all_new[:-recent_n]
+
+    def set_conversation_summary(self, conversation_id: str, summary: str, through_message_id: int):
+        with self._lock:
+            self._conn.execute(
+                "UPDATE conversations SET summary=?, summary_updated_at=?, summary_through_message_id=? WHERE id=?",
+                (summary, time.time(), through_message_id, conversation_id)
+            )
+            self._conn.commit()
 
     # ------------------------------------------------------------------ projects --
     # A project is just a named group of conversations (Claude-Projects-style "folder"),
@@ -397,6 +469,69 @@ class ConversationStore:
             results.append(dict(r))
         return results
 
+    # --------------------------------------------------------- semantic search --
+    # Complements (doesn't replace) the FTS5 keyword search above — FTS finds exact/near
+    # word matches ("bitwarden" finds "bitwarden"), this finds conceptual matches even
+    # when the wording differs entirely ("password manager" finding a bitwarden
+    # conversation that never used that literal word). Embeddings are populated in the
+    # background after each message is saved (see server.py) — search only ever looks at
+    # whatever's already been embedded, it never blocks on embedding new content itself.
+
+    def add_message_embedding(self, message_id: int, conversation_id: str, model: str, embedding: list):
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO message_embeddings (message_id, conversation_id, model, embedding) "
+                "VALUES (?,?,?,?)",
+                (message_id, conversation_id, model, json.dumps(embedding))
+            )
+            self._conn.commit()
+
+    def has_embedding(self, message_id: int) -> bool:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM message_embeddings WHERE message_id=?", (message_id,)
+            ).fetchone()
+        return row is not None
+
+    def semantic_search(self, query_embedding: list, limit: int = 10, min_similarity: float = 0.5) -> list:
+        """Returns conversations ranked by their best-matching message's cosine similarity
+        to query_embedding — one entry per conversation (its single strongest match), not
+        one per message, so results read like search() does: a list of conversations."""
+        from embeddings import cosine_similarity
+
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT e.message_id, e.conversation_id, e.embedding, m.content, m.role "
+                "FROM message_embeddings e JOIN messages m ON m.id = e.message_id"
+            ).fetchall()
+
+        best_per_conversation = {}
+        for row in rows:
+            try:
+                vec = json.loads(row["embedding"])
+            except (json.JSONDecodeError, TypeError):
+                continue
+            sim = cosine_similarity(query_embedding, vec)
+            if sim < min_similarity:
+                continue
+            cid = row["conversation_id"]
+            if cid not in best_per_conversation or sim > best_per_conversation[cid]["similarity"]:
+                best_per_conversation[cid] = {
+                    "similarity": sim, "snippet": row["content"][:200], "role": row["role"],
+                }
+
+        ranked = sorted(best_per_conversation.items(), key=lambda kv: -kv[1]["similarity"])[:limit]
+        results = []
+        for cid, info in ranked:
+            conv = self.get_conversation(cid)
+            if not conv:
+                continue
+            results.append({
+                "id": cid, "title": conv["title"], "updated_at": conv["updated_at"],
+                "similarity": round(info["similarity"], 4), "snippet": info["snippet"],
+            })
+        return results
+
     # ---------------------------------------------------------------- migration --
     def _migrate_legacy_sessions(self):
         """One-time import of data/sessions/*.json (Phase 2d flat-file format) so nothing
@@ -443,3 +578,16 @@ class ConversationStore:
 # Module-level singleton — same pattern as Memory()/AuthorizationCheck() elsewhere in
 # this codebase: importing this module is enough to get a working, auto-created store.
 store = ConversationStore()
+
+
+def semantic_search_conversations(query: str, limit: int = 10) -> dict:
+    """Tool-facing wrapper — lets Jarvis itself search past conversations by meaning, not
+    just keyword ("what did we figure out about the router setup" finding a conversation
+    that never used the word 'router'). Degrades to an empty result with a clear note if
+    Ollama/the embedding model isn't reachable, never raises."""
+    from embeddings import embed_text
+    vec = embed_text(query)
+    if vec is None:
+        return {"query": query, "results": [],
+                "note": "Semantic search unavailable right now (Ollama or the embedding model isn't reachable)."}
+    return {"query": query, "results": store.semantic_search(vec, limit=limit)}
