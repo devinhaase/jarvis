@@ -431,6 +431,32 @@ try:
 except Exception as _dep_err:
     pass  # Dependency audit tool unavailable — Jarvis continues without it
 
+# --- Hacking reference library -> tool synthesis (Phase 6 item 3) ---
+# Confirmed with Devin: synthesis may generate genuinely new script content (not just
+# recombine existing tools), tightly gated — see hacking_synthesis.py's module docstring
+# for the three safety properties enforced in code. synthesize_tool_from_reference only
+# ever writes a file + proposes a skill (Tier 4, same as generate_payload); the ONE tool
+# that can actually run a synthesized script (run_synthesized_script) is also Tier 4 and
+# re-checks authorization on every call regardless of prior approvals — role="offense" so
+# the same centralized _check_offense_authorization gate every other offense tool goes
+# through in coordinator.py also applies here, on top of the tool's own internal check.
+try:
+    from hacking_synthesis import (
+        add_reference_material, list_reference_material, read_reference_material,
+        synthesize_tool_from_reference, run_synthesized_script,
+    )
+
+    hacking_synthesis_reg = {
+        "add_reference_material": Tool("add_reference_material", "Add a note/script/writeup to your hacking reference library for the Hacking team to draw from", Tier.TIER_2, add_reference_material, team="hacking"),
+        "list_reference_material": Tool("list_reference_material", "List everything currently in your hacking reference library", Tier.TIER_1, list_reference_material, team="hacking"),
+        "read_reference_material": Tool("read_reference_material", "Read a specific file from your hacking reference library", Tier.TIER_1, read_reference_material, team="hacking"),
+        "synthesize_tool_from_reference": Tool("synthesize_tool_from_reference", "Generate a NEW script from reference material for a stated goal — only ever writes the file and proposes it as a skill for review (Tier 4: requires explicit confirmation), never executes anything", Tier.TIER_4, synthesize_tool_from_reference, role="offense", team="hacking"),
+        "run_synthesized_script": Tool("run_synthesized_script", "Run a previously-synthesized script against an authorized target — re-checks authorized_targets.json on every call regardless of prior approvals (Tier 4: requires explicit confirmation)", Tier.TIER_4, run_synthesized_script, role="offense", team="hacking"),
+    }
+    ALL_TOOLS = {**ALL_TOOLS, **hacking_synthesis_reg}
+except Exception as _synth_err:
+    pass  # Hacking synthesis tools unavailable — Jarvis continues without them
+
 # ---------------------------------------------------------------------------
 # CAPABILITY REQUIREMENTS (multi-device routing)
 # ---------------------------------------------------------------------------
@@ -477,6 +503,14 @@ REQUIRES_CAPABILITY = {
     "overwrite_note": "filesystem",
     "delete_note": "filesystem",
     "index_vault_into_memory": "filesystem",
+    # Hacking reference library / tool synthesis (Phase 6 item 3) — reads/writes the
+    # server host's local reference & synthesized-tool directories, and (for
+    # run_synthesized_script) shells out on the server host.
+    "add_reference_material": "filesystem",
+    "list_reference_material": "filesystem",
+    "read_reference_material": "filesystem",
+    "synthesize_tool_from_reference": "filesystem",
+    "run_synthesized_script": "filesystem",
     # Network team tools (Phase 4) — all reach the local network the server sits on.
     "ping_sweep": "filesystem",
     "check_latency": "filesystem",          # pings from wherever the server host actually is
