@@ -90,6 +90,19 @@ def set_fake_rounds(rounds):
     server_module.brain._llm_error = None
 
 
+# Background loops (posture_monitor/daily_briefing/team_board/deep_reflection) fire an
+# immediate check on startup and broadcast to every connected socket — no-op them so they
+# can't collide with this test's own expected events (same fix test_teams_phase4.py's
+# suite applied after finding this for real).
+async def _noop_background_loop(*args, **kwargs):
+    await asyncio.Event().wait()
+
+import posture_monitor, daily_briefing, team_board_dispatcher as _tbd, deep_reflection as _dr
+posture_monitor.posture_monitor_loop = _noop_background_loop
+daily_briefing.daily_briefing_loop = _noop_background_loop
+_tbd.team_board_dispatch_loop = _noop_background_loop
+_dr.deep_reflection_loop = _noop_background_loop
+
 # --- Start the real server in a background thread ---
 config = uvicorn.Config(server_module.app, host="127.0.0.1", port=TEST_PORT, log_level="warning")
 uv_server = uvicorn.Server(config)

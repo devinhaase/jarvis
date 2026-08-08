@@ -161,6 +161,19 @@ def set_fake_rounds(rounds):
     server_module.brain._llm_error = None
 
 
+# Same background-loop collision test_teams_phase4.py's own test suite found and fixed:
+# posture_monitor/daily_briefing/team_board/deep_reflection all fire an immediate check on
+# server startup and broadcast to every connected socket — a real one landing mid-test
+# would get mistaken for this test's own expected event. No-op them all here too.
+async def _noop_background_loop(*args, **kwargs):
+    await asyncio.Event().wait()
+
+import posture_monitor, daily_briefing, team_board_dispatcher as _tbd, deep_reflection as _dr
+posture_monitor.posture_monitor_loop = _noop_background_loop
+daily_briefing.daily_briefing_loop = _noop_background_loop
+_tbd.team_board_dispatch_loop = _noop_background_loop
+_dr.deep_reflection_loop = _noop_background_loop
+
 config = uvicorn.Config(server_module.app, host="127.0.0.1", port=TEST_PORT, log_level="warning")
 uv_server = uvicorn.Server(config)
 server_thread = threading.Thread(target=uv_server.run, daemon=True)

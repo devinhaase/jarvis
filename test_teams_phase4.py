@@ -154,10 +154,11 @@ server_module.APPROVAL_DEFAULT = {"TIER_3": True, "TIER_4": False}  # Tier 4 (th
 async def _noop_background_loop(*args, **kwargs):
     await asyncio.Event().wait()  # never completes; cleanly cancelled at server shutdown
 
-import posture_monitor, daily_briefing, team_board_dispatcher as _tbd
+import posture_monitor, daily_briefing, team_board_dispatcher as _tbd, deep_reflection as _dr
 posture_monitor.posture_monitor_loop = _noop_background_loop
 daily_briefing.daily_briefing_loop = _noop_background_loop
 _tbd.team_board_dispatch_loop = _noop_background_loop
+_dr.deep_reflection_loop = _noop_background_loop  # Phase 6 item 2 — same "no background loop actually runs during a routing test" reasoning as the others above
 
 DEVICE_ID = "teams-test-device"
 DEVICE_TOKEN = server_module.registry.register(DEVICE_ID, "Teams Test Device", ["filesystem"])

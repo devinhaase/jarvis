@@ -156,6 +156,13 @@ async def _lifespan(_app: FastAPI):
     except Exception as e:
         print(f"[Server] Team board dispatcher not started: {e}")
 
+    deep_reflection_task = None
+    try:
+        from deep_reflection import deep_reflection_loop
+        deep_reflection_task = asyncio.create_task(deep_reflection_loop(brain=brain, broadcast_all=_broadcast_all))
+    except Exception as e:
+        print(f"[Server] Deep reflection loop not started: {e}")
+
     yield
 
     if monitor_task:
@@ -164,6 +171,8 @@ async def _lifespan(_app: FastAPI):
         briefing_task.cancel()
     if team_board_task:
         team_board_task.cancel()
+    if deep_reflection_task:
+        deep_reflection_task.cancel()
 
 
 app = FastAPI(title="Jarvis Server", lifespan=_lifespan)

@@ -139,14 +139,31 @@ class Skill:
             tools=tools,
         )
 
+    def weight(self) -> float:
+        """Phase 6 item 2 ('deeper self-learning', Option A — weight proven skills more
+        heavily over time, still fully file-based/auditable): success_count minus
+        fail_count, scaled down for skills with only a handful of runs so one lucky
+        success doesn't outrank a skill genuinely proven over dozens of uses. A skill with
+        zero recorded outcomes yet (freshly approved) gets weight 0 — neither promoted nor
+        buried, it just hasn't earned a position yet."""
+        total = self.success_count + self.fail_count
+        if total == 0:
+            return 0.0
+        import math
+        net = self.success_count - self.fail_count
+        return net * math.log(total + 1)
+
     def as_prompt_blurb(self) -> str:
         """Short form injected into a team's system prompt (see teams.py) for an ACTIVE
         skill — a documented recipe the model can choose to follow. Following it still
         means emitting normal [TOOL: ...] calls through the normal dispatch path; this is
         a prompt hint, not a new execution primitive (see reflection.py's docstring for
-        why that's the safety-relevant design choice)."""
+        why that's the safety-relevant design choice). Proven skills (weight() clears a
+        threshold) are labeled as such — visible, legible weighting, not a silent reorder."""
         steps_text = " -> ".join(self.steps) if self.steps else "(no steps recorded)"
-        return f"- \"{self.name}\" (learned skill, {self.tier}): use when {self.when_to_use}. Steps: {steps_text}"
+        total_runs = self.success_count + self.fail_count
+        proven_tag = f" [proven — {self.success_count}/{total_runs} successful]" if self.weight() >= 3 else ""
+        return f"- \"{self.name}\"{proven_tag} (learned skill, {self.tier}): use when {self.when_to_use}. Steps: {steps_text}"
 
 
 # ---------------------------------------------------------------------------
@@ -305,5 +322,15 @@ def active_skills_for_team(team_key: str) -> list:
     """Active, non-flagged skills scoped to a team — flagged skills stay listed as active
     (flagging never disables) but are excluded from what gets suggested to the model going
     forward until a human clears the flag, same "don't act on your own uncertain signal"
-    posture the kill switch's Tier-1-only carve-out already models elsewhere."""
-    return [s for s in list_skills(status="active", team=team_key) if not s.flagged]
+    posture the kill switch's Tier-1-only carve-out already models elsewhere.
+
+    Phase 6 item 2: sorted by weight() descending — a skill proven across many successful
+    runs surfaces first (and gets the "[proven]" label in as_prompt_blurb), a brand-new or
+    shaky one still shows up, just lower in the list. This is the entire "weighted more
+    heavily in context over time" requirement — visible ordering + a visible label, nothing
+    hidden, and it changes exactly one thing: presentation order in a prompt. It cannot
+    change a skill's tier, cannot touch the authorization list, and cannot activate
+    anything — those guarantees live in propose_skill/approve_skill/edit_skill above,
+    completely untouched by this function."""
+    skills = [s for s in list_skills(status="active", team=team_key) if not s.flagged]
+    return sorted(skills, key=lambda s: s.weight(), reverse=True)

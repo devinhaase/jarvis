@@ -294,10 +294,11 @@ skills.SKILLS_DIR = _tmp_skills_dir3
 async def _noop_background_loop(*args, **kwargs):
     await asyncio.Event().wait()
 
-import posture_monitor, daily_briefing, team_board_dispatcher as _tbd
+import posture_monitor, daily_briefing, team_board_dispatcher as _tbd, deep_reflection as _dr
 posture_monitor.posture_monitor_loop = _noop_background_loop
 daily_briefing.daily_briefing_loop = _noop_background_loop
 _tbd.team_board_dispatch_loop = _noop_background_loop
+_dr.deep_reflection_loop = _noop_background_loop  # Phase 6 item 2
 
 server_module.APPROVAL_TIMEOUT = {"TIER_3": 0.6, "TIER_4": 0.6}
 server_module.APPROVAL_DEFAULT = {"TIER_3": True, "TIER_4": False}
