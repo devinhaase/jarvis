@@ -145,9 +145,23 @@ def _ensure_web_gui_device() -> str:
 connected = {}      # websocket -> {"device_id", "capabilities", "conversation_id"}
 watchers = {}        # conversation_id -> set(websocket) currently attached to it
 pending_approvals = {}    # approval_id -> asyncio.Future
+pending_approval_meta = {}  # approval_id -> {"action", "tier", "team", "created_at"} (Phase 7:
+                             # the Overseer dashboard's queue needs to list what's pending, not
+                             # just await it — same lifecycle/cleanup as pending_approvals itself.
 main_loop = None          # captured at startup so worker threads can schedule back onto it
 brain = None              # the one shared JarvisBrain — created in _lifespan, after main_loop exists
 mind_watchers = set()     # websockets connected to /ws/mind (Phase 8c, Living Mind — read-only observers)
+
+# Phase 7: live team status, updated by _on_status hooks already firing during a turn (see
+# _run_turn's on_status closure below) — same "reuse the event stream that already exists"
+# approach the push-notification hooks and the GUI's transient team notes both already take,
+# not a new tracking mechanism layered on top. In-memory only, same as `connected`/
+# `watchers` above — a restart naturally resets every team to idle, which is correct (no
+# turn survives a restart to still be "working" anyway).
+team_status = {}   # team_key -> {"status": "idle"|"working"|"blocked", "detail": str, "since": float}
+TEAM_KEYS = ("personal_assistant", "network", "it", "cybersecurity", "hacking")
+for _k in TEAM_KEYS:
+    team_status[_k] = {"status": "idle", "detail": "", "since": 0.0}
 
 
 @asynccontextmanager
@@ -174,7 +188,9 @@ async def _lifespan(_app: FastAPI):
     team_board_task = None
     try:
         from team_board_dispatcher import team_board_dispatch_loop
-        team_board_task = asyncio.create_task(team_board_dispatch_loop(brain=brain, broadcast_all=_broadcast_all))
+        team_board_task = asyncio.create_task(team_board_dispatch_loop(
+            brain=brain, broadcast_all=_broadcast_all, set_team_status=_set_team_status,
+        ))
     except Exception as e:
         print(f"[Server] Team board dispatcher not started: {e}")
 
@@ -258,13 +274,30 @@ async def _broadcast_mind(payload: dict):
 # the event loop, so a Tier-3/4 confirmation can be answered by any connected device.
 # ---------------------------------------------------------------------------
 
-async def _wait_for_approval(action_name: str, tier_name: str) -> bool:
+async def _set_team_status(team_key: str, status: str, detail: str = ""):
+    """Phase 7: updates the in-memory tracker and broadcasts the change — a dashboard tile
+    only needs to re-render on an actual transition, not poll. `team_key=None` (a
+    non-team-routed call, e.g. the CLI's local menu-driven single-tool commands) is a valid,
+    silent no-op — there's no tile for "no team" to update."""
+    if team_key not in team_status:
+        return
+    team_status[team_key] = {"status": status, "detail": detail, "since": time.time()}
+    await _broadcast_all({"type": "team_status_changed", "team": team_key, **team_status[team_key]})
+
+
+async def _wait_for_approval(action_name: str, tier_name: str, team: str = None) -> bool:
     approval_id = uuid.uuid4().hex
     future = main_loop.create_future()
     pending_approvals[approval_id] = future
+    created_at = time.time()
+    pending_approval_meta[approval_id] = {
+        "action": action_name, "tier": tier_name, "team": team, "created_at": created_at,
+    }
+    if team:
+        await _set_team_status(team, "blocked", f"waiting on approval: {action_name}")
     await _broadcast_all({
         "type": "approval_request", "approval_id": approval_id,
-        "action": action_name, "tier": tier_name,
+        "action": action_name, "tier": tier_name, "team": team,
     })
     # Phase 6 item 6: a WS broadcast alone only reaches a device with the app already open —
     # the entire reason this item exists is to reach a phone that's asleep in your pocket.
@@ -284,8 +317,13 @@ async def _wait_for_approval(action_name: str, tier_name: str) -> bool:
             f"{action_name} needs your OK within {int(APPROVAL_TIMEOUT.get('TIER_4', 60))}s."
             if is_tier4 else f"{action_name} will proceed in a few seconds unless you cancel."
         )
+        # Phase 7: deep-links a tapped notification straight to this team's dashboard (see
+        # sw.js's notificationclick handler and app.js's dashboard-side handling), on top of
+        # the conversation_id link item 6 already had — "what needs my attention" now points
+        # at the actual queue item, not just the app in general.
         asyncio.create_task(asyncio.to_thread(
             _push.send_to_all, "approvals", title, body, tag="approval", critical=is_tier4,
+            dashboard={"team": team, "approval_id": approval_id} if team else None,
         ))
     except Exception:
         pass
@@ -295,20 +333,26 @@ async def _wait_for_approval(action_name: str, tier_name: str) -> bool:
         return APPROVAL_DEFAULT.get(tier_name, False)
     finally:
         pending_approvals.pop(approval_id, None)
+        pending_approval_meta.pop(approval_id, None)
+        if team:
+            await _set_team_status(team, "working", action_name)
 
 
 def make_approval_fn():
-    """Returns a sync callable(action_name, tier) -> bool suitable for Coordinator's
-    approval_fn — called from a worker thread, so it hops onto the main event loop with
-    run_coroutine_threadsafe and blocks that worker thread until resolved, exactly
+    """Returns a sync callable(action_name, tier, team=None) -> bool suitable for
+    Coordinator's approval_fn — called from a worker thread, so it hops onto the main event
+    loop with run_coroutine_threadsafe and blocks that worker thread until resolved, exactly
     mirroring the CLI's blocking Confirm.ask()/time.sleep() from the caller's point of
-    view, just answered by a remote device instead of local stdin."""
+    view, just answered by a remote device instead of local stdin. `team` (Phase 7): see
+    Coordinator._request_approval's docstring — this is the callable it calls with team= as
+    a keyword, falling back to the 2-arg form for any caller (test or otherwise) that hasn't
+    been updated for it."""
 
-    def approval_fn(action_name, tier) -> bool:
+    def approval_fn(action_name, tier, team=None) -> bool:
         if tier not in (Tier.TIER_3, Tier.TIER_4):
             return True
         tier_name = tier.name
-        fut = asyncio.run_coroutine_threadsafe(_wait_for_approval(action_name, tier_name), main_loop)
+        fut = asyncio.run_coroutine_threadsafe(_wait_for_approval(action_name, tier_name, team), main_loop)
         try:
             return fut.result(timeout=APPROVAL_TIMEOUT.get(tier_name, 30.0) + 5)
         except Exception:
@@ -360,6 +404,116 @@ def _integration_status() -> dict:
         "gmail": bool(g.get("gmail")),
         "calendar": bool(g.get("calendar")),
         "drive": bool(g.get("drive")),
+    }
+
+
+def _tailscale_status() -> dict:
+    """Phase 7 (ties into item 7's remote-access audit): a best-effort, read-only check of
+    whether Tailscale is installed/running on this machine — the Overseer's system-health
+    strip shouldn't fabricate a VPN status it can't actually see. Degrades to "not
+    detected" rather than raising if the binary isn't on PATH or the daemon isn't running
+    (a totally normal state — Tailscale is Devin's own opt-in setup per REMOTE_ACCESS.md,
+    not a requirement)."""
+    try:
+        from security_hardening import run_hardened
+        result = run_hardened(["tailscale", "status", "--json"], timeout=5)
+        if result.returncode != 0:
+            return {"detected": False}
+        data = json.loads(result.stdout)
+        self_node = data.get("Self", {})
+        return {
+            "detected": True,
+            "running": self_node.get("Online", False),
+            "hostname": self_node.get("HostName"),
+        }
+    except Exception:
+        return {"detected": False}
+
+
+def _team_health(team_key: str) -> dict:
+    """Best-effort, reuses whatever's already lying around rather than triggering a fresh
+    check on every dashboard open. Teams with no bespoke health source yet (personal_
+    assistant/network/it) return {} — an honest "nothing dedicated here yet", not a made-up
+    number; their dashboard falls back to task history, which IS real."""
+    if team_key == "hacking":
+        try:
+            from auth_check import AuthorizationCheck
+            data = AuthorizationCheck()._data
+            return {
+                "authorized_hosts": data.get("hosts", []),
+                "authorized_domains": data.get("domains", []),
+                "authorized_networks": data.get("networks", []),
+            }
+        except Exception:
+            return {"authorized_hosts": [], "authorized_domains": [], "authorized_networks": []}
+    if team_key == "cybersecurity":
+        return {"open_alerts": len(store.list_incidents(target_team="cybersecurity", status="open"))}
+    return {}
+
+
+def _overseer_snapshot() -> dict:
+    """Phase 7: the whole-system view — 5 team tiles, one merged prioritized queue across
+    every team (Tier-4 approvals > Tier-3 > proposed skills, most-recent-first within each),
+    the cross-team incident log (only entries actually routed team-to-team, not every
+    incident), and system-level health. Assembled fresh on request rather than cached —
+    every piece is either already in memory (team_status, pending_approval_meta) or a cheap
+    local read (skills/incidents files), so there's no real cost to not caching it."""
+    import skills as _skills
+    from teams import TEAMS
+
+    teams_out = [
+        {"key": key, "name": team.display_name, **team_status.get(key, {"status": "idle", "detail": "", "since": 0.0})}
+        for key, team in TEAMS.items()
+    ]
+
+    queue = []
+    for approval_id, meta in pending_approval_meta.items():
+        queue.append({
+            "kind": "approval", "id": approval_id,
+            "urgency": 0 if meta["tier"] == "TIER_4" else 1,
+            "team": meta["team"], "title": meta["action"], "tier": meta["tier"],
+            "created_at": meta["created_at"],
+        })
+    for sk in _skills.list_skills(status="proposed"):
+        queue.append({
+            "kind": "skill", "id": sk.name, "urgency": 2,
+            "team": sk.team, "title": sk.name, "tier": sk.tier,
+            "created_at": sk.created_at,
+        })
+    queue.sort(key=lambda q: (q["urgency"], -q["created_at"]))
+
+    incidents = store.list_incidents(limit=30)
+    cross_team_log = [
+        i for i in incidents
+        if i.get("target_team") and i.get("target_team") != i.get("created_by_team")
+    ]
+
+    return {
+        "teams": teams_out, "queue": queue, "cross_team_log": cross_team_log,
+        "integration": _integration_status(), "vpn": _tailscale_status(),
+    }
+
+
+def _team_dashboard(team_key: str) -> dict:
+    """Phase 7: one team's full drill-down view."""
+    from teams import TEAMS
+    import skills as _skills
+    team = TEAMS.get(team_key)
+    if not team:
+        return {"error": f"unknown team: {team_key!r}"}
+
+    proposed = [_skill_to_dict(s) for s in _skills.list_skills(status="proposed") if s.team == team_key]
+    queue = [
+        {"id": aid, **meta} for aid, meta in pending_approval_meta.items() if meta["team"] == team_key
+    ]
+    return {
+        "key": team_key, "name": team.display_name,
+        **team_status.get(team_key, {"status": "idle", "detail": "", "since": 0.0}),
+        "history": shared_memory.get_team_episodes(team_key, limit=20),
+        "proposed_skills": proposed,
+        "queue": queue,
+        "incidents": store.list_incidents(target_team=team_key, status="open"),
+        "health": _team_health(team_key),
     }
 
 
@@ -418,6 +572,11 @@ async def _run_turn(conversation_id: str, chat_history: list, capabilities: list
                 # moment execution actually begins — same signal the conversation GUI uses,
                 # just fanned out to a second, independent set of observers.
                 await _broadcast_mind({"type": "tool_fired", "tools": payload.get("data") or []})
+            elif payload.get("event") == "team_active":
+                # Phase 7: the same team_router event the GUI's transient "IT team
+                # working…" note already renders from, now also flips that team's
+                # dashboard tile — one real event stream, two consumers.
+                await _set_team_status(payload["data"]["team"], "working", "running this turn")
         elif kind == "chunk":
             await _broadcast_watchers(conversation_id, {
                 "type": "stream_chunk", "conversation_id": conversation_id, "text": payload
@@ -430,6 +589,12 @@ async def _run_turn(conversation_id: str, chat_history: list, capabilities: list
             result = payload
         elif kind == "error":
             result = {"response": f"Internal error: {payload}", "tools_ran": [], "denied": []}
+
+    # Phase 7: back to idle once the turn's fully done — unless a team ended the turn still
+    # mid-approval (status would already be "blocked", not "working"; don't clobber that).
+    for team_key in result.get("teams_involved", []):
+        if team_status.get(team_key, {}).get("status") == "working":
+            await _set_team_status(team_key, "idle", "")
 
     return result
 
@@ -620,6 +785,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 fut = pending_approvals.get(approval_id)
                 if fut and not fut.done():
                     fut.set_result(bool(msg.get("approved", False)))
+                    # Phase 7: lets the Overseer/team dashboard queue drop this item right
+                    # away instead of waiting on its next unrelated refresh trigger.
+                    await _broadcast_all({"type": "approval_resolved", "approval_id": approval_id})
                 continue
 
             if mtype == "voice_status":
@@ -724,6 +892,16 @@ async def websocket_endpoint(websocket: WebSocket):
 
             if mtype == "get_integration_status":
                 await websocket.send_json({"type": "integration_status", **_integration_status()})
+                continue
+
+            # ------------------------------------------------------------ Phase 7: Overseer --
+            if mtype == "get_overseer_snapshot":
+                await websocket.send_json({"type": "overseer_snapshot", **_overseer_snapshot()})
+                continue
+
+            if mtype == "get_team_dashboard":
+                team_key = msg.get("team")
+                await websocket.send_json({"type": "team_dashboard", **_team_dashboard(team_key)})
                 continue
 
             # ------------------------------------------------------------ Phase 6 item 6: push --

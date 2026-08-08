@@ -1,6 +1,6 @@
 # MEMORY.md — What Jarvis has learned
 
-_Auto-generated from data/semantic_memory.json — do not hand-edit, changes will be overwritten on the next fact/preference update. Last generated: 2026-08-08 21:05 UTC._
+_Auto-generated from data/semantic_memory.json — do not hand-edit, changes will be overwritten on the next fact/preference update. Last generated: 2026-08-08 22:01 UTC._
 
 ## Ongoing facts
 
@@ -20,6 +20,14 @@ _Auto-generated from data/semantic_memory.json — do not hand-edit, changes wil
 - Push Test Scratch note created with content "temp, safe to overwrite/delete for a test"
 - Note "Push Test Scratch" deleted with content "temp, safe to overwrite/delete for a test"
 - Jarvis is part of the Network team, and the kill switch is ARMED, preventing tool execution.
+- The MAC address aa:bb:cc:11:22:33 is unrecognized on the local LAN network.
+- create_team_incident requires 'created_by_team' argument, which is missing
+- Kill switch is ARMED (reason: end to end) — 'create_backup' (Tier TIER_2) was refused. Call disarm_k
+- Unknown device joined local network, MAC address aa:bb:cc:11:22:33 unrecognized in ARP table
+- NAS IP is 192.168.1.50; local ARP table shows 15 devices including router, NAS, and printer
+- Kill switch is not armed; unknown device with MAC aa:bb:cc:11:22:33 detected.
+- Unknown device joined local network with MAC address aa:bb:cc:11:22:33
+- overwrite_note requires 'note_path' argument instead of 'note_title'
 
 ## Active projects
 

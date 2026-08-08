@@ -59,30 +59,94 @@
 
   <div id="sidebarOverlay"></div>
 
-  <main id="main">
-    <header id="chatHeader">
-      <h1 id="convTitle" contenteditable="true" spellcheck="false">Jarvis</h1>
-      <span id="projectBadge" class="project-badge hidden"></span>
-      <span id="listeningIndicator" class="listening-indicator hidden">
-        <span class="dot"></span> listening…
-      </span>
-      <button id="exportBtn" class="icon-btn small header-right" title="Export this conversation as markdown">⬇</button>
-    </header>
+  <div id="contentArea">
+    <!-- Phase 7: Overseer/team dashboards default view, Chat one click away — see
+         REMOTE_ACCESS.md-adjacent task.md entry for why (chat's existing UX stays
+         completely untouched underneath this tab switch). -->
+    <div id="viewTabs" class="view-tabs">
+      <button id="dashboardTabBtn" class="view-tab active">📊 Dashboard</button>
+      <button id="chatTabBtn" class="view-tab">💬 Chat</button>
+    </div>
 
-    <div id="messages" class="messages"></div>
+    <main id="main" class="hidden">
+      <header id="chatHeader">
+        <h1 id="convTitle" contenteditable="true" spellcheck="false">Jarvis</h1>
+        <span id="projectBadge" class="project-badge hidden"></span>
+        <span id="listeningIndicator" class="listening-indicator hidden">
+          <span class="dot"></span> listening…
+        </span>
+        <button id="exportBtn" class="icon-btn small header-right" title="Export this conversation as markdown">⬇</button>
+      </header>
 
-    <div id="attachmentBar" class="attachment-bar hidden"></div>
+      <div id="messages" class="messages"></div>
 
-    <form id="composer" class="composer">
-      <button type="button" id="attachBtn" class="icon-btn composer-btn" title="Attach files">📎</button>
-      <button type="button" id="attachFolderBtn" class="icon-btn composer-btn" title="Attach a folder">📁</button>
-      <input type="file" id="fileInput" multiple hidden>
-      <input type="file" id="folderInput" webkitdirectory directory multiple hidden>
-      <textarea id="composerInput" placeholder="Message Jarvis…" rows="1" autocomplete="off"></textarea>
-      <button type="button" id="micBtn" class="icon-btn composer-btn" title="Voice input">🎤</button>
-      <button id="sendBtn" type="submit" class="send-btn" title="Send">➤</button>
-    </form>
-  </main>
+      <div id="attachmentBar" class="attachment-bar hidden"></div>
+
+      <form id="composer" class="composer">
+        <button type="button" id="attachBtn" class="icon-btn composer-btn" title="Attach files">📎</button>
+        <button type="button" id="attachFolderBtn" class="icon-btn composer-btn" title="Attach a folder">📁</button>
+        <input type="file" id="fileInput" multiple hidden>
+        <input type="file" id="folderInput" webkitdirectory directory multiple hidden>
+        <textarea id="composerInput" placeholder="Message Jarvis…" rows="1" autocomplete="off"></textarea>
+        <button type="button" id="micBtn" class="icon-btn composer-btn" title="Voice input">🎤</button>
+        <button id="sendBtn" type="submit" class="send-btn" title="Send">➤</button>
+      </form>
+    </main>
+
+    <div id="dashboardView">
+      <div id="overseerView">
+        <header class="dashboard-header">
+          <h1>Overseer</h1>
+          <span id="vpnStatusBadge" class="vpn-status-badge hidden"></span>
+        </header>
+
+        <div id="teamTiles" class="team-tiles"></div>
+
+        <div class="dashboard-section">
+          <h2>Needs your attention</h2>
+          <div id="overseerQueue" class="queue-list"></div>
+        </div>
+
+        <div class="dashboard-section">
+          <h2>Cross-team activity</h2>
+          <div id="crossTeamLog" class="cross-team-log"></div>
+        </div>
+
+        <div class="dashboard-section">
+          <h2>System health</h2>
+          <div id="systemHealthStrip" class="system-health-strip"></div>
+        </div>
+      </div>
+
+      <div id="teamDashboardView" class="hidden">
+        <button id="backToOverseerBtn" class="text-btn">← Overseer</button>
+        <header class="dashboard-header">
+          <h1 id="teamDashTitle"></h1>
+          <span id="teamDashStatus" class="team-status-pill"></span>
+        </header>
+
+        <div class="dashboard-section">
+          <h2>Live activity</h2>
+          <div id="teamActivityFeed" class="activity-feed"></div>
+        </div>
+
+        <div class="dashboard-section">
+          <h2>Waiting on you</h2>
+          <div id="teamQueue" class="queue-list"></div>
+        </div>
+
+        <div class="dashboard-section">
+          <h2>Recent task history</h2>
+          <div id="teamHistory" class="task-history"></div>
+        </div>
+
+        <div class="dashboard-section">
+          <h2>Team health</h2>
+          <div id="teamHealthBlock" class="team-health-block"></div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div id="toolsModal" class="modal-overlay hidden">
     <div class="modal">

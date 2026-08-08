@@ -5,6 +5,25 @@
 const $ = (sel) => document.querySelector(sel);
 
 const els = {
+  contentArea: $("#contentArea"),
+  dashboardTabBtn: $("#dashboardTabBtn"),
+  chatTabBtn: $("#chatTabBtn"),
+  main: $("#main"),
+  dashboardView: $("#dashboardView"),
+  overseerView: $("#overseerView"),
+  teamDashboardView: $("#teamDashboardView"),
+  teamTiles: $("#teamTiles"),
+  overseerQueue: $("#overseerQueue"),
+  crossTeamLog: $("#crossTeamLog"),
+  systemHealthStrip: $("#systemHealthStrip"),
+  vpnStatusBadge: $("#vpnStatusBadge"),
+  backToOverseerBtn: $("#backToOverseerBtn"),
+  teamDashTitle: $("#teamDashTitle"),
+  teamDashStatus: $("#teamDashStatus"),
+  teamActivityFeed: $("#teamActivityFeed"),
+  teamQueue: $("#teamQueue"),
+  teamHistory: $("#teamHistory"),
+  teamHealthBlock: $("#teamHealthBlock"),
   sidebar: $("#sidebar"),
   sidebarToggle: $("#sidebarToggle"),
   sidebarOverlay: $("#sidebarOverlay"),
@@ -83,6 +102,8 @@ const state = {
   awaitingVoiceReply: false,  // speak the next assistant reply aloud
   isRecording: false,
   skills: [],
+  activeView: "dashboard",   // "dashboard" | "chat" — Phase 7, dashboard is the default landing view
+  dashboardTeam: null,       // team key currently drilled into, or null when on the Overseer view
 };
 
 // ---------------------------------------------------------------------------
@@ -157,6 +178,7 @@ function handleServerMessage(msg) {
       loadConversationMessages(state.conversationId);
       send({ type: "get_integration_status" });
       send({ type: "list_skills" });
+      send({ type: "get_overseer_snapshot" });
       break;
 
     case "conversation_list":
@@ -249,10 +271,34 @@ function handleServerMessage(msg) {
         state.skills = [msg.skill];
       }
       updateSkillsPendingBadge();
+      refreshCurrentDashboardView();  // Phase 7: a proposed/reviewed skill can change the queue
       break;
 
     case "integration_status":
       renderIntegrationStatus(msg);
+      break;
+
+    case "overseer_snapshot":
+      renderOverseerSnapshot(msg);
+      break;
+
+    case "team_dashboard":
+      renderTeamDashboard(msg);
+      break;
+
+    case "team_status_changed":
+      // Instant, in-place tile/pill update — no round trip needed for something this
+      // cheap, same reasoning as the integration dots' own live-toggle pattern.
+      patchTeamStatus(msg.team, msg.status, msg.detail);
+      break;
+
+    case "cross_team_incident":
+      // One team's output just triggered another's — refetch so the Overseer's log picks
+      // it up within a couple seconds, matching the live-update bar every other dashboard
+      // piece already holds itself to.
+      if (state.activeView === "dashboard" && !state.dashboardTeam) {
+        send({ type: "get_overseer_snapshot" });
+      }
       break;
 
     case "push_settings":
@@ -318,6 +364,11 @@ function handleServerMessage(msg) {
 
     case "approval_request":
       showApprovalBanner(msg);
+      refreshCurrentDashboardView();  // Phase 7: a new Tier-3/4 item just entered the queue
+      break;
+
+    case "approval_resolved":
+      refreshCurrentDashboardView();  // Phase 7: that item just left the queue
       break;
   }
 }
@@ -787,6 +838,286 @@ els.pushTestBtn.addEventListener("click", () => {
   els.pushTestBtn.textContent = "Sending…";
   send({ type: "test_push_notification" });
 });
+
+// ---------------------------------------------------------------------------
+// Phase 7: Overseer + team dashboards. Dashboard is the default landing view (see
+// index.html — #dashboardTabBtn starts .active, #main starts .hidden); switching to Chat
+// leaves chat's own behavior completely untouched underneath. Within Dashboard, two
+// sub-views: Overseer (all 5 teams) and one team's drill-down, never both at once.
+// ---------------------------------------------------------------------------
+
+function showDashboardView() {
+  state.activeView = "dashboard";
+  els.main.classList.add("hidden");
+  els.dashboardView.classList.remove("hidden");
+  els.dashboardTabBtn.classList.add("active");
+  els.chatTabBtn.classList.remove("active");
+  refreshCurrentDashboardView();
+}
+
+function showChatView() {
+  state.activeView = "chat";
+  els.dashboardView.classList.add("hidden");
+  els.main.classList.remove("hidden");
+  els.chatTabBtn.classList.add("active");
+  els.dashboardTabBtn.classList.remove("active");
+}
+
+els.dashboardTabBtn.addEventListener("click", showDashboardView);
+els.chatTabBtn.addEventListener("click", showChatView);
+
+function showOverseer() {
+  state.dashboardTeam = null;
+  els.overseerView.classList.remove("hidden");
+  els.teamDashboardView.classList.add("hidden");
+  send({ type: "get_overseer_snapshot" });
+}
+
+function showTeamDashboard(teamKey) {
+  state.dashboardTeam = teamKey;
+  els.overseerView.classList.add("hidden");
+  els.teamDashboardView.classList.remove("hidden");
+  send({ type: "get_team_dashboard", team: teamKey });
+}
+
+els.backToOverseerBtn.addEventListener("click", showOverseer);
+
+// Re-fetches whichever dashboard sub-view is actually on screen — the single place every
+// live-update trigger (approval_request/resolved, skill_updated, cross_team_incident)
+// funnels through, so none of them need to know which sub-view is currently open.
+function refreshCurrentDashboardView() {
+  if (state.activeView !== "dashboard") return;
+  if (state.dashboardTeam) send({ type: "get_team_dashboard", team: state.dashboardTeam });
+  else send({ type: "get_overseer_snapshot" });
+}
+
+function renderOverseerSnapshot(snap) {
+  renderTeamTiles(snap.teams || []);
+  renderQueue(els.overseerQueue, snap.queue || [], true);
+  renderCrossTeamLog(snap.cross_team_log || []);
+  renderSystemHealth(snap.integration || {}, snap.vpn || {});
+}
+
+function renderTeamTiles(teams) {
+  els.teamTiles.innerHTML = "";
+  for (const t of teams) {
+    const tile = document.createElement("div");
+    tile.className = `team-tile status-${t.status}`;
+    tile.dataset.team = t.key;
+
+    const icon = document.createElement("div");
+    icon.className = "tile-icon";
+    icon.textContent = TEAM_ICON[t.key] || "🤖";
+    const name = document.createElement("div");
+    name.className = "tile-name";
+    name.textContent = t.name;
+    const status = document.createElement("div");
+    status.className = "tile-status";
+    status.textContent = t.status;
+
+    tile.appendChild(icon);
+    tile.appendChild(name);
+    tile.appendChild(status);
+    tile.addEventListener("click", () => showTeamDashboard(t.key));
+    els.teamTiles.appendChild(tile);
+  }
+}
+
+// Instant in-place update on a live team_status_changed broadcast — avoids a full
+// re-fetch for something this cheap, while refreshCurrentDashboardView() (triggered by
+// the less frequent events) stays the correctness backstop.
+function patchTeamStatus(teamKey, status, detail) {
+  const tile = els.teamTiles.querySelector(`.team-tile[data-team="${teamKey}"]`);
+  if (tile) {
+    tile.className = `team-tile status-${status}`;
+    const statusEl = tile.querySelector(".tile-status");
+    if (statusEl) statusEl.textContent = status;
+  }
+  if (state.dashboardTeam === teamKey) {
+    els.teamDashStatus.textContent = status;
+    els.teamDashStatus.className = "team-status-pill status-" + status;
+  }
+}
+
+function renderQueue(container, items, showTeamLabel) {
+  container.innerHTML = "";
+  if (!items || items.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "queue-empty";
+    empty.textContent = "Nothing waiting.";
+    container.appendChild(empty);
+    return;
+  }
+  // Tier 4 > Tier 3 > proposed skill, newest first within each — mirrors the server's own
+  // _overseer_snapshot() ordering; team-scoped queues (showTeamLabel=false) get the same
+  // treatment for consistency even though it's already pre-sorted server-side there too.
+  for (const item of items) {
+    const row = document.createElement("div");
+    row.className = "queue-item";
+
+    const badge = document.createElement("span");
+    if (item.kind === "approval") {
+      badge.className = "queue-badge " + (item.tier === "TIER_4" ? "tier-4" : "tier-3");
+      badge.textContent = item.tier === "TIER_4" ? "TIER 4" : "TIER 3";
+    } else {
+      badge.className = "queue-badge skill";
+      badge.textContent = "SKILL";
+    }
+    row.appendChild(badge);
+
+    const title = document.createElement("span");
+    title.className = "queue-title";
+    title.textContent = item.title;
+    row.appendChild(title);
+
+    if (showTeamLabel) {
+      const team = document.createElement("span");
+      team.className = "queue-team";
+      team.textContent = `${TEAM_ICON[item.team] || "🤖"} ${TEAM_LABEL[item.team] || item.team || "—"}`;
+      row.appendChild(team);
+    }
+
+    const actions = document.createElement("span");
+    actions.className = "queue-actions";
+    if (item.kind === "approval") {
+      const approve = document.createElement("button");
+      approve.className = "approve";
+      approve.textContent = "Approve";
+      approve.addEventListener("click", () => send({ type: "approve", approval_id: item.id, approved: true }));
+      const deny = document.createElement("button");
+      deny.className = "deny";
+      deny.textContent = "Deny";
+      deny.addEventListener("click", () => send({ type: "approve", approval_id: item.id, approved: false }));
+      actions.appendChild(approve);
+      actions.appendChild(deny);
+    } else {
+      const review = document.createElement("button");
+      review.className = "approve";
+      review.textContent = "Review";
+      review.addEventListener("click", () => {
+        send({ type: "list_skills" });
+        els.skillsModal.classList.remove("hidden");
+      });
+      actions.appendChild(review);
+    }
+    row.appendChild(actions);
+    container.appendChild(row);
+  }
+}
+
+function renderCrossTeamLog(incidents) {
+  els.crossTeamLog.innerHTML = "";
+  if (!incidents || incidents.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "log-empty";
+    empty.textContent = "No cross-team activity yet.";
+    els.crossTeamLog.appendChild(empty);
+    return;
+  }
+  for (const inc of incidents) {
+    const row = document.createElement("div");
+    row.className = "log-entry";
+    const link = document.createElement("div");
+    link.className = "log-link";
+    link.textContent = `${TEAM_ICON[inc.created_by_team] || "🤖"} ${TEAM_LABEL[inc.created_by_team] || inc.created_by_team || "?"} `
+      + `→ ${TEAM_ICON[inc.target_team] || "🤖"} ${TEAM_LABEL[inc.target_team] || inc.target_team}`;
+    const title = document.createElement("div");
+    title.className = "log-title";
+    title.textContent = `${inc.title} (${inc.status})`;
+    row.appendChild(link);
+    row.appendChild(title);
+    els.crossTeamLog.appendChild(row);
+  }
+}
+
+function renderSystemHealth(integration, vpn) {
+  els.systemHealthStrip.innerHTML = "";
+  const items = [
+    ["Obsidian", integration.obsidian], ["Gmail", integration.gmail],
+    ["Calendar", integration.calendar], ["Drive", integration.drive],
+  ];
+  for (const [label, ok] of items) {
+    const chip = document.createElement("span");
+    chip.className = "health-chip " + (ok ? "ok" : "warn");
+    chip.textContent = `${ok ? "●" : "○"} ${label}`;
+    els.systemHealthStrip.appendChild(chip);
+  }
+  if (vpn && vpn.detected) {
+    els.vpnStatusBadge.textContent = vpn.running ? `🔒 Tailscale connected${vpn.hostname ? " (" + vpn.hostname + ")" : ""}` : "🔒 Tailscale installed, not running";
+    els.vpnStatusBadge.className = "vpn-status-badge" + (vpn.running ? " ok" : "");
+  } else {
+    els.vpnStatusBadge.className = "vpn-status-badge hidden";
+  }
+}
+
+function renderTeamDashboard(dash) {
+  if (dash.error) return;
+  els.teamDashTitle.textContent = `${TEAM_ICON[dash.key] || "🤖"} ${dash.name}`;
+  els.teamDashStatus.textContent = dash.status;
+  els.teamDashStatus.className = "team-status-pill status-" + dash.status;
+
+  els.teamActivityFeed.innerHTML = "";
+  if (dash.status === "idle") {
+    const empty = document.createElement("div");
+    empty.className = "feed-empty";
+    empty.textContent = "Idle — nothing running right now.";
+    els.teamActivityFeed.appendChild(empty);
+  } else {
+    const entry = document.createElement("div");
+    entry.className = "feed-entry";
+    const time = document.createElement("span");
+    time.className = "feed-time";
+    time.textContent = relTime(dash.since);
+    entry.appendChild(time);
+    entry.appendChild(document.createTextNode(dash.detail || dash.status));
+    els.teamActivityFeed.appendChild(entry);
+  }
+
+  const combinedQueue = [
+    ...(dash.queue || []).map(q => ({ ...q, kind: "approval" })),
+    ...(dash.proposed_skills || []).map(s => ({ kind: "skill", id: s.name, title: s.name, team: s.team, tier: s.tier })),
+  ];
+  renderQueue(els.teamQueue, combinedQueue, false);
+
+  els.teamHistory.innerHTML = "";
+  if (!dash.history || dash.history.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "history-empty";
+    empty.textContent = "No recorded actions yet.";
+    els.teamHistory.appendChild(empty);
+  } else {
+    for (const ep of dash.history) {
+      const row = document.createElement("div");
+      row.className = "history-entry outcome-" + (ep.outcome || "success");
+      const dot = document.createElement("span");
+      dot.className = "outcome-dot";
+      const action = document.createElement("span");
+      action.className = "history-action";
+      action.textContent = ep.action;
+      const time = document.createElement("span");
+      time.className = "history-time";
+      time.textContent = relTime(ep.timestamp);
+      row.appendChild(dot);
+      row.appendChild(action);
+      row.appendChild(time);
+      els.teamHistory.appendChild(row);
+    }
+  }
+
+  renderTeamHealthBlock(dash.key, dash.health || {}, dash.incidents || []);
+}
+
+function renderTeamHealthBlock(teamKey, health, incidents) {
+  const parts = [];
+  if (teamKey === "hacking") {
+    const total = (health.authorized_hosts || []).length + (health.authorized_domains || []).length + (health.authorized_networks || []).length;
+    parts.push(`${total} authorized target(s)`);
+  } else if (teamKey === "cybersecurity") {
+    parts.push(`${health.open_alerts || 0} open alert(s)`);
+  }
+  if (incidents.length) parts.push(`${incidents.length} open incident(s) targeting this team`);
+  els.teamHealthBlock.textContent = parts.length ? parts.join(" · ") : "No dedicated health checks for this team yet.";
+}
 
 // ---------------------------------------------------------------------------
 // Skill review queue (Phase 5) — proposed skills need Devin's explicit approve/edit/
@@ -1455,8 +1786,19 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.addEventListener("message", (event) => {
     if (event.data && event.data.type === "open_conversation" && event.data.conversation_id) {
       openConversation(event.data.conversation_id);
+    } else if (event.data && event.data.type === "open_dashboard" && event.data.team) {
+      openDashboardTeam(event.data.team);
     }
   });
+}
+
+// Phase 7: shared by the postMessage handler above and the ?team= deep link below —
+// switches to the Dashboard tab and drills straight into one team, same "tapping a phone
+// alert lands you on the exact queue item" requirement item 6's conversation deep link
+// already satisfies, just for a team dashboard instead of a chat.
+function openDashboardTeam(teamKey) {
+  showDashboardView();
+  showTeamDashboard(teamKey);
 }
 
 function notifyIfHidden(title, body) {
@@ -1512,15 +1854,22 @@ async function disablePushNotifications() {
 boot();
 
 // Deep link: a notification tap that had to open a fresh tab/window (sw.js's
-// notificationclick openWindow fallback) lands here with ?conv=<id> — open it once we're
-// actually connected (state.conversationId gets set by the "ready" handler first).
+// notificationclick openWindow fallback) lands here with ?conv=<id> or ?team=<key> — open
+// it once we're actually connected (state.conversationId gets set by the "ready" handler
+// first; a team dashboard has no such prerequisite but waits on the same open socket so
+// get_team_dashboard has something to send to).
 (function _handleDeepLinkOnLoad() {
   const params = new URLSearchParams(window.location.search);
   const conv = params.get("conv");
-  if (!conv) return;
+  const team = params.get("team");
+  if (!conv && !team) return;
   const tryOpen = () => {
-    if (state.ws && state.ws.readyState === WebSocket.OPEN) openConversation(conv);
-    else setTimeout(tryOpen, 300);
+    if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+      if (team) openDashboardTeam(team);
+      else openConversation(conv);
+    } else {
+      setTimeout(tryOpen, 300);
+    }
   };
   tryOpen();
   history.replaceState(null, "", window.location.pathname);

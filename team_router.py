@@ -156,7 +156,7 @@ def route_and_run(brain, chat_history: list, capabilities, conversation_id: str 
         if team_key == "hacking" and not explicit and i > 0 and team_plan[i - 1] == "cybersecurity":
             approved = brain.coordinator._request_approval(
                 "Cybersecurity team recommends Hacking team verify these findings — proceed?",
-                Tier.TIER_4,
+                Tier.TIER_4, team="cybersecurity",
             )
             if on_status:
                 on_status("team_handoff_gate", {"from": "cybersecurity", "to": "hacking", "approved": approved})
@@ -175,7 +175,7 @@ def route_and_run(brain, chat_history: list, capabilities, conversation_id: str 
         for kind, payload in brain.process_turn_stream(
             chat_history, capabilities, max_iterations=3, on_status=on_status,
             conversation_id=conversation_id, tool_subset=team.tool_names(),
-            team_context=_handoff_context(team_key, accumulated),
+            team_context=_handoff_context(team_key, accumulated), team_key=team_key,
         ):
             if kind == "done":
                 team_result = payload

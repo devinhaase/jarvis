@@ -1,11 +1,11 @@
 ---
 name: Multi-Tool File Renaming
-status: proposed
+status: active
 tier: TIER_3
 team: it
 version: 1
 created_at: 1786207585.2043812
-updated_at: 1786207585.2043812
+updated_at: 1786223576.4414687
 success_count: 0
 fail_count: 0
 flagged: false

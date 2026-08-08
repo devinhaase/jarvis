@@ -112,7 +112,7 @@ class JarvisBrain:
 
     def process_turn(self, chat_history: list, device_capabilities: list = None,
                       max_iterations: int = 3, on_tool_step=None, conversation_id: str = None,
-                      tool_subset: set = None, team_context: str = "") -> dict:
+                      tool_subset: set = None, team_context: str = "", team_key: str = None) -> dict:
         """
         Run one full ReAct turn: LLM -> optional tool execution -> LLM again if tools ran.
         Mutates `chat_history` in place (appends assistant/tool messages) and returns it as
@@ -129,6 +129,10 @@ class JarvisBrain:
         `tool_subset`/`team_context` (Phase 4): restricts this turn to a team's tools — see
         team_router.py. None/"" (the default) is the original, unrestricted single-loop
         behavior, unchanged for any caller that doesn't pass them.
+
+        `team_key` (Phase 7): which team this turn belongs to, threaded straight through to
+        Coordinator.run_tools() for episode/approval attribution — see its docstring. None
+        (unrestricted/non-team-routed calls) is unchanged from before this existed.
 
         Returns {"response": str, "tools_ran": [...], "denied": [...]}.
         """
@@ -163,7 +167,7 @@ class JarvisBrain:
                     for step in allowed:
                         on_tool_step(step.get("tool"), self._tier_name(step.get("tool")))
 
-                tool_results = self.coordinator.run_tools(allowed, tool_subset) if allowed else ""
+                tool_results = self.coordinator.run_tools(allowed, tool_subset, team=team_key) if allowed else ""
                 if blocked:
                     blocked_msg = "\n".join(
                         f"{b['tool']}: refused — this session's device didn't declare the "
@@ -188,7 +192,7 @@ class JarvisBrain:
 
     def process_turn_stream(self, chat_history: list, device_capabilities: list = None,
                              max_iterations: int = 3, on_status=None, conversation_id: str = None,
-                             tool_subset: set = None, team_context: str = ""):
+                             tool_subset: set = None, team_context: str = "", team_key: str = None):
         """
         Generator version of process_turn() for real-time UIs (the web GUI, the voice
         companion's live transcript). Same ReAct loop, same chat_history mutation, same
@@ -207,6 +211,9 @@ class JarvisBrain:
 
         `tool_subset`/`team_context` (Phase 4): see process_turn()'s docstring — same
         pass-through, same "None/'' means unrestricted, unchanged" default.
+
+        `team_key` (Phase 7): see process_turn()'s docstring — same pass-through to
+        Coordinator.run_tools() for episode/approval attribution.
         """
         from llm import stream_and_filter_tags
 
@@ -280,7 +287,7 @@ class JarvisBrain:
                 if on_status:
                     on_status("tools_starting", [s.get("tool") for s in allowed])
 
-                tool_results = self.coordinator.run_tools(allowed, tool_subset) if allowed else ""
+                tool_results = self.coordinator.run_tools(allowed, tool_subset, team=team_key) if allowed else ""
                 if "FAILED" in tool_results or "outside this team's scope" in tool_results:
                     any_tool_failed = True
                 if blocked:

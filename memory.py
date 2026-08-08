@@ -87,12 +87,24 @@ class Memory:
                 json.dump(self.semantic_memory, f, indent=4)
             self._sync_memory_docs()
 
-    def log_episode(self, action, result, tier):
+    def log_episode(self, action, result, tier, team=None, outcome=None):
+        """`team`/`outcome` (Phase 7): additive fields, both optional and default None so
+        every pre-Phase-7 caller (and every existing episodic_memory.jsonl line already on
+        disk) keeps working unchanged — get_team_episodes() below just won't find entries
+        older than this to file under a team. `team` is the tool's registered team
+        (tools.ALL_TOOLS[action].team), looked up by the caller, not re-derived here — this
+        module doesn't import tools.py to avoid a needless coupling for a single lookup.
+        `outcome` is one of "success"/"failed"/"denied"/"blocked", explicit rather than
+        re-parsed from `result`'s "ERROR:"/"Cancelled by user" text prefixes at read time —
+        those prefixes are still written for backward-compatible human/LLM reading, but
+        get_team_episodes() reads `outcome` directly rather than re-sniffing that text."""
         episode = {
             "timestamp": time.time(),
             "action": action,
             "result": result,
-            "tier": tier
+            "tier": tier,
+            "team": team,
+            "outcome": outcome,
         }
         with open(self.episodic_file, 'a') as f:
             f.write(json.dumps(episode) + "\n")
@@ -105,6 +117,27 @@ class Memory:
             return [json.loads(l) for l in lines[-n:]]
         except Exception:
             return []
+
+    def get_team_episodes(self, team_key: str, limit: int = 20) -> list:
+        """Phase 7: a team dashboard's task-history panel — most recent first, only entries
+        actually tagged with this team (older, pre-Phase-7 log lines have team=None and are
+        correctly excluded, not mis-attributed to any team)."""
+        try:
+            with open(self.episodic_file, 'r') as f:
+                lines = f.readlines()
+        except Exception:
+            return []
+        matched = []
+        for line in reversed(lines):
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if entry.get("team") == team_key:
+                matched.append(entry)
+                if len(matched) >= limit:
+                    break
+        return matched
 
     def update_working_memory(self, key, value):
         self.working_memory[key] = value

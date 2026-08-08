@@ -191,7 +191,7 @@ def _in_quiet_hours(quiet_hours: dict, now: datetime = None) -> bool:
 
 def send_to_device(device_id: str, category: str, title: str, body: str,
                     tag: str = None, conversation_id: str = None, critical: bool = False,
-                    force: bool = False) -> bool:
+                    force: bool = False, dashboard: dict = None) -> bool:
     """Sends one push notification to one device, honoring its category toggle and quiet
     hours. Returns True if actually sent (not "delivered" — the push service's job, this
     codebase has no way to confirm that), False if suppressed or the device has no
@@ -200,7 +200,10 @@ def send_to_device(device_id: str, category: str, title: str, body: str,
     `force=True` (used only by the settings modal's explicit "send test notification"
     button) bypasses both gates: an intentional, one-off user action to verify the endpoint
     itself works shouldn't be silently swallowed by whatever category/quiet-hours prefs
-    happen to be set. Auto-prunes the subscription on 404/410 (the browser revoked it)."""
+    happen to be set. `dashboard` (Phase 7): optional {"team": ..., "approval_id": ...} —
+    lets a tapped notification deep-link straight to a team dashboard or queue item, same
+    idea as `conversation_id` but for the Overseer dashboard instead of a chat. Auto-prunes
+    the subscription on 404/410 (the browser revoked it)."""
     assert category in CATEGORIES, f"unknown push category: {category!r}"
     data = _load()
     entry = data.get(device_id)
@@ -213,7 +216,7 @@ def send_to_device(device_id: str, category: str, title: str, body: str,
 
     payload = {
         "title": title, "body": body[:200], "category": category,
-        "tag": tag or category, "conversation_id": conversation_id,
+        "tag": tag or category, "conversation_id": conversation_id, "dashboard": dashboard,
     }
     try:
         from pywebpush import webpush, WebPushException
@@ -245,13 +248,13 @@ def send_to_device(device_id: str, category: str, title: str, body: str,
 
 
 def send_to_all(category: str, title: str, body: str, tag: str = None,
-                 conversation_id: str = None, critical: bool = False) -> int:
+                 conversation_id: str = None, critical: bool = False, dashboard: dict = None) -> int:
     """Broadcasts to every subscribed device (mirrors server.py's _broadcast_all — an
     approval or alert should reach any device you might have on you, not just one).
     Returns how many actually sent."""
     sent = 0
     for device_id in list(_load().keys()):
         if send_to_device(device_id, category, title, body, tag=tag,
-                           conversation_id=conversation_id, critical=critical):
+                           conversation_id=conversation_id, critical=critical, dashboard=dashboard):
             sent += 1
     return sent

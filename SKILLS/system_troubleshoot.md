@@ -1,11 +1,11 @@
 ---
 name: system_troubleshoot
-status: proposed
+status: active
 tier: TIER_1
 team: it
 version: 1
 created_at: 1786206622.2103648
-updated_at: 1786206622.2103648
+updated_at: 1786223580.3001952
 success_count: 0
 fail_count: 0
 flagged: false

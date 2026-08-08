@@ -75,6 +75,19 @@ def _check_offense_authorization(tool, args: dict):
     AuthorizationCheck().is_authorized(target)
 
 
+def _autofill_created_by_team(tool_name: str, args: dict, episode_team):
+    """Phase 7: create_team_incident's required `created_by_team` argument asks the model
+    to correctly self-report which team it's currently acting as — found live-testing this
+    item that a real local model reliably omits it (`_create_team_incident() missing 1
+    required positional argument`), even though the coordinator already *knows* the answer
+    (it's exactly `episode_team`, the same value now threaded through for episode/approval
+    attribution). Filling it in here — only when the model left it out, never overriding an
+    explicit value — turns a hard failure into a call that just works, using data this
+    dispatch layer already has rather than trusting the model to repeat it back correctly."""
+    if tool_name == "create_team_incident" and episode_team and not args.get("created_by_team"):
+        args["created_by_team"] = episode_team
+
+
 class Coordinator:
     def __init__(self, approval_fn=None, memory=None):
         """
@@ -88,9 +101,21 @@ class Coordinator:
         self.memory = memory or Memory()
         self._external_approval_fn = approval_fn
 
-    def _request_approval(self, action_name, tier):
+    def _request_approval(self, action_name, tier, team=None):
+        """`team` (Phase 7): which team's turn this approval belongs to, for the Overseer
+        dashboard's per-team "waiting on me" queue and the push notification's deep-link
+        target — optional and backward-compatible on purpose. Every approval_fn written
+        before this phase (server.py's original signature, several tests' `lambda a, t:
+        True`) takes exactly 2 positional args; rather than force every one of them to grow
+        a third parameter for a feature only the real server-side implementation actually
+        uses, this tries the 3-arg form first and falls back to the original 2-arg call on
+        TypeError — the same "evolve a callback contract without breaking existing callers"
+        shape a public API would use, just applied to an in-process callable."""
         if self._external_approval_fn is not None:
-            return self._external_approval_fn(action_name, tier)
+            try:
+                return self._external_approval_fn(action_name, tier, team=team)
+            except TypeError:
+                return self._external_approval_fn(action_name, tier)
 
         if tier == Tier.TIER_4:
             console.print(f"\n[bold red][Tier 4][/bold red] Permission requested to execute '[bold]{action_name}[/bold]'.")
@@ -106,7 +131,7 @@ class Coordinator:
                     return False
         return True
 
-    def run_tools(self, plan: list, tool_subset: set = None) -> str:
+    def run_tools(self, plan: list, tool_subset: set = None, team: str = None) -> str:
         """
         Execute a list of tool steps.
         Returns a formatted string of all results to feed back to the LLM.
@@ -116,6 +141,13 @@ class Coordinator:
         team's scope; llm.py hiding other tools from the prompt is just the first layer
         (a model can still hallucinate a call to something it wasn't shown), same
         defense-in-depth pattern _check_offense_authorization already uses below.
+
+        `team` (Phase 7): which team's turn this is, for episode/approval attribution on
+        the Overseer dashboard. Deliberately the *caller's* active-team context, not
+        `tool.team` — a coordinator-level tool (team=None on the Tool itself, e.g. the kill
+        switch) still ran as part of some specific team's turn, and that's what a dashboard
+        needs to show it under, not "no team." Falls back to `tool.team` only when the
+        caller didn't say (e.g. a non-team-routed direct call) — still better than nothing.
         """
         results_summary = ""
 
@@ -134,6 +166,8 @@ class Coordinator:
                 console.print(f"[bold red]{msg}[/bold red]")
                 results_summary += f"{msg}\n"
                 break
+            episode_team = team if team is not None else tool.team
+            _autofill_created_by_team(tool_name, args, episode_team)
 
             # 1. REASON
             console.print(f"\n[bold magenta]🤔 Reason:[/bold magenta] Using [bold]{tool_name}[/bold] (Tier {tool.tier.name})")
@@ -142,15 +176,15 @@ class Coordinator:
                 _check_kill_switch(tool)
             except KillSwitchActive as e:
                 console.print(f"[bold red]🛑 Kill switch:[/bold red] {e}")
-                self.memory.log_episode(tool_name, str(e), tool.tier.name)
+                self.memory.log_episode(tool_name, str(e), tool.tier.name, team=episode_team, outcome="blocked")
                 results_summary += f"{tool_name}: {e}\n"
                 break
 
             # 2. ACT
-            if not self._request_approval(tool_name, tool.tier):
+            if not self._request_approval(tool_name, tool.tier, team=episode_team):
                 msg = f"Execution of '{tool_name}' denied/cancelled by user."
                 console.print(f"[bold red]⛔ Act:[/bold red] {msg}")
-                self.memory.log_episode(tool_name, "Cancelled by user", tool.tier.name)
+                self.memory.log_episode(tool_name, "Cancelled by user", tool.tier.name, team=episode_team, outcome="denied")
                 results_summary += f"{tool_name}: {msg}\n"
                 break
 
@@ -168,32 +202,34 @@ class Coordinator:
                 safe_result_str = redact(str(result).encode('ascii', 'ignore').decode('ascii'))
                 display_str = safe_result_str[:1200] + "\n...[truncated]" if len(safe_result_str) > 1200 else safe_result_str
                 console.print(f"[bold green]👀 Observe:[/bold green]\n{display_str}")
-                self.memory.log_episode(tool_name, safe_result_str, tool.tier.name)
+                self.memory.log_episode(tool_name, safe_result_str, tool.tier.name, team=episode_team, outcome="success")
                 results_summary += f"{tool_name} SUCCESS:\n{safe_result_str}\n\n"
             except Exception as e:
                 err_msg = str(e)
                 console.print(f"[bold red]❌ Observe (FAILURE):[/bold red] {err_msg}")
-                self.memory.log_episode(tool_name, f"ERROR: {err_msg}", tool.tier.name)
+                self.memory.log_episode(tool_name, f"ERROR: {err_msg}", tool.tier.name, team=episode_team, outcome="failed")
                 results_summary += f"{tool_name} FAILED: {err_msg}\n"
                 console.print("[bold red]🛑 Reflect:[/bold red] Tool failed. Halting to prevent cascading errors.")
                 break
 
         return results_summary.strip()
 
-    def run_single_tool(self, tool_name: str, args: dict = None):
+    def run_single_tool(self, tool_name: str, args: dict = None, team: str = None):
         """
         Execute exactly one tool through the same Reason -> Act -> Observe flow
         (approval + logging) as run_tools, but return the raw result object
         instead of a stringified summary — for callers that need structured
         data (e.g. rendering a dashboard) rather than LLM-facing text.
         Returns None if the tool isn't found, approval is denied, or execution fails
-        (each case is already printed/logged before returning).
+        (each case is already printed/logged before returning). `team`: see run_tools.
         """
         args = args or {}
         tool = ALL_TOOLS.get(tool_name)
         if not tool:
             console.print(f"[bold red]Error: Tool '{tool_name}' not found.[/bold red]")
             return None
+        episode_team = team if team is not None else tool.team
+        _autofill_created_by_team(tool_name, args, episode_team)
 
         console.print(f"\n[bold magenta]🤔 Reason:[/bold magenta] Using [bold]{tool_name}[/bold] (Tier {tool.tier.name})")
 
@@ -201,13 +237,13 @@ class Coordinator:
             _check_kill_switch(tool)
         except KillSwitchActive as e:
             console.print(f"[bold red]🛑 Kill switch:[/bold red] {e}")
-            self.memory.log_episode(tool_name, str(e), tool.tier.name)
+            self.memory.log_episode(tool_name, str(e), tool.tier.name, team=episode_team, outcome="blocked")
             return None
 
-        if not self._request_approval(tool_name, tool.tier):
+        if not self._request_approval(tool_name, tool.tier, team=episode_team):
             msg = f"Execution of '{tool_name}' denied/cancelled by user."
             console.print(f"[bold red]⛔ Act:[/bold red] {msg}")
-            self.memory.log_episode(tool_name, "Cancelled by user", tool.tier.name)
+            self.memory.log_episode(tool_name, "Cancelled by user", tool.tier.name, team=episode_team, outcome="denied")
             return None
 
         try:
@@ -215,10 +251,10 @@ class Coordinator:
             with console.status(f"[bold green]Running {tool_name}...[/bold green]", spinner="dots"):
                 result = tool.execute(**args)
             safe_result_str = redact(str(result).encode('ascii', 'ignore').decode('ascii'))
-            self.memory.log_episode(tool_name, safe_result_str, tool.tier.name)
+            self.memory.log_episode(tool_name, safe_result_str, tool.tier.name, team=episode_team, outcome="success")
             return result
         except Exception as e:
             err_msg = str(e)
             console.print(f"[bold red]❌ Observe (FAILURE):[/bold red] {err_msg}")
-            self.memory.log_episode(tool_name, f"ERROR: {err_msg}", tool.tier.name)
+            self.memory.log_episode(tool_name, f"ERROR: {err_msg}", tool.tier.name, team=episode_team, outcome="failed")
             return None

@@ -21,10 +21,12 @@ self.addEventListener("fetch", (event) => {
 // Phase 6 item 6: real Web Push. This is the actual point of a service worker beyond just
 // satisfying installability — `push` fires here even if every tab is closed and the browser
 // itself isn't the foreground app, which is what makes a phone notification possible at all.
-// The payload shape (title/body/category/tag/conversation_id) is whatever
+// The payload shape (title/body/category/tag/conversation_id/dashboard) is whatever
 // push_notifications.py's send_to_device() sent as JSON — see that module for the category
 // list and quiet-hours gating; by the time a push reaches this handler it's already been
-// decided worth showing.
+// decided worth showing. `dashboard` (Phase 7): optional {"team": ..., "approval_id": ...},
+// set only for approval pushes — lets a tap land straight on the right team dashboard or
+// queue item instead of just the app in general.
 // ---------------------------------------------------------------------------
 
 self.addEventListener("push", (event) => {
@@ -40,28 +42,32 @@ self.addEventListener("push", (event) => {
       icon: "/icon.svg",
       badge: "/icon.svg",
       tag: payload.tag || "jarvis",
-      data: { conversation_id: payload.conversation_id || null },
+      data: { conversation_id: payload.conversation_id || null, dashboard: payload.dashboard || null },
     })
   );
 });
 
-// Tap-to-deep-link: focus an already-open Jarvis tab and hand it the conversation id via
-// postMessage if one exists, otherwise open a fresh tab straight into that conversation via
-// a URL query param (app.js reads it on load — see boot()).
+// Tap-to-deep-link: focus an already-open Jarvis tab and hand it the conversation id (or
+// dashboard target) via postMessage if one exists, otherwise open a fresh tab straight into
+// it via URL query params (app.js reads them on load — see boot() and _handleDeepLinkOnLoad).
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const conversationId = event.notification.data && event.notification.data.conversation_id;
+  const dashboard = event.notification.data && event.notification.data.dashboard;
   event.waitUntil(
     (async () => {
       const clientsList = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
       for (const client of clientsList) {
         if ("focus" in client) {
           await client.focus();
-          if (conversationId) client.postMessage({ type: "open_conversation", conversation_id: conversationId });
+          if (dashboard) client.postMessage({ type: "open_dashboard", team: dashboard.team, approval_id: dashboard.approval_id });
+          else if (conversationId) client.postMessage({ type: "open_conversation", conversation_id: conversationId });
           return;
         }
       }
-      const url = conversationId ? `/?conv=${encodeURIComponent(conversationId)}` : "/";
+      let url = "/";
+      if (dashboard && dashboard.team) url = `/?team=${encodeURIComponent(dashboard.team)}`;
+      else if (conversationId) url = `/?conv=${encodeURIComponent(conversationId)}`;
       if (self.clients.openWindow) await self.clients.openWindow(url);
     })()
   );
