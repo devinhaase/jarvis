@@ -210,6 +210,20 @@ try:
 except Exception:
     pass  # Hardening tools unavailable — Jarvis continues without them
 
+try:
+    from generate_self_knowledge import get_self_knowledge
+
+    ops_tools["get_self_knowledge"] = Tool(
+        "get_self_knowledge",
+        "Return a live self-knowledge document about Jarvis itself: full tool inventory by "
+        "tier/role, current security posture, test coverage, recent capability history, and "
+        "known scope boundaries. Call this when Devin asks what you can do, how you're built, "
+        "or what your limits are — don't guess from training data.",
+        Tier.TIER_1, get_self_knowledge,
+    )
+except Exception:
+    pass  # Self-knowledge doc unavailable — Jarvis continues without it
+
 ALL_TOOLS = {**assistant_tools, **ops_tools}
 
 # --- Security Tools (registered separately; require authorized_targets.json) ---

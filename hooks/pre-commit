@@ -1,0 +1,20 @@
+#!/bin/sh
+# Phase 8b — self-knowledge drift check. Tracked here (hooks/pre-commit) since git doesn't
+# version .git/hooks/ itself; installed once via:
+#   cp hooks/pre-commit .git/hooks/pre-commit   (chmod +x .git/hooks/pre-commit on non-Windows)
+#
+# Low-friction by design (matches this project's existing "don't add friction a solo dev
+# will just route around" pattern — see Tier 3's 3s auto-proceed): if context/self/jarvis.md
+# is stale relative to the live tool registry, this regenerates and re-stages it
+# automatically rather than failing the commit and making you re-run something by hand.
+
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+python generate_self_knowledge.py --check > /dev/null 2>&1
+if [ $? -ne 0 ]; then
+    echo "context/self/jarvis.md is stale — regenerating and staging it."
+    python generate_self_knowledge.py
+    git add context/self/jarvis.md
+fi
+
+exit 0
