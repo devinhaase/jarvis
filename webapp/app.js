@@ -37,6 +37,10 @@ const els = {
   skillsModal: $("#skillsModal"),
   skillsCloseBtn: $("#skillsCloseBtn"),
   skillsBody: $("#skillsBody"),
+  teamsBtn: $("#teamsBtn"),
+  teamsModal: $("#teamsModal"),
+  teamsCloseBtn: $("#teamsCloseBtn"),
+  teamsBody: $("#teamsBody"),
   projectModal: $("#projectModal"),
   projectModalCloseBtn: $("#projectModalCloseBtn"),
   projectNameInput: $("#projectNameInput"),
@@ -210,6 +214,10 @@ function handleServerMessage(msg) {
       renderToolsModal(msg.tools);
       break;
 
+    case "team_list":
+      renderTeamsModal(msg.teams);
+      break;
+
     case "skill_list":
       state.skills = msg.skills;
       renderSkillsModal(state.skills);
@@ -243,8 +251,19 @@ function handleServerMessage(msg) {
       break;
 
     case "tool_status":
-      if (msg.conversation_id === state.conversationId && msg.event === "tools_starting") {
+      if (msg.conversation_id !== state.conversationId) break;
+      if (msg.event === "tools_starting") {
         appendToolNote(`Running ${msg.data.join(", ")}…`);
+      } else if (msg.event === "team_routing") {
+        const icons = msg.data.teams.map(k => TEAM_ICON[k] || "🤖").join("");
+        const names = msg.data.teams.map(k => TEAM_LABEL[k] || k).join(" → ");
+        const how = msg.data.explicit ? "asked directly" : "routed";
+        appendToolNote(`${icons} ${names} (${how})`, "team-note");
+      } else if (msg.event === "team_active") {
+        appendToolNote(`${TEAM_ICON[msg.data.team] || "🤖"} ${TEAM_LABEL[msg.data.team] || msg.data.team} team working…`, "team-note");
+      } else if (msg.event === "team_handoff_gate") {
+        const verdict = msg.data.approved ? "approved" : "not approved";
+        appendToolNote(`⚠ Cybersecurity → Hacking handoff ${verdict}`, "team-note");
       }
       break;
 
@@ -589,6 +608,57 @@ function renderToolsModal(tools) {
 }
 
 // ---------------------------------------------------------------------------
+// Teams (Phase 4) — a static reference panel (mirrors Tools) plus live routing notes
+// rendered inline in the chat itself (see the tool_status handler above) so you can
+// actually see which agent handled a given request, not just look it up after the fact.
+// ---------------------------------------------------------------------------
+
+const TEAM_LABEL = {
+  personal_assistant: "Personal Assistant", network: "Network", it: "IT",
+  cybersecurity: "Cybersecurity", hacking: "Hacking",
+};
+const TEAM_ICON = {
+  personal_assistant: "🗂", network: "📡", it: "🖥", cybersecurity: "🛡", hacking: "🎯",
+};
+
+els.teamsBtn.addEventListener("click", () => {
+  send({ type: "list_teams" });
+  els.teamsModal.classList.remove("hidden");
+});
+els.teamsCloseBtn.addEventListener("click", () => els.teamsModal.classList.add("hidden"));
+
+function renderTeamsModal(teamList) {
+  els.teamsBody.innerHTML = "";
+  for (const team of teamList) {
+    const entry = document.createElement("div");
+    entry.className = "tool-entry";
+
+    const nameRow = document.createElement("div");
+    const name = document.createElement("span");
+    name.className = "tool-name";
+    name.textContent = `${TEAM_ICON[team.key] || "🤖"} ${team.name}`;
+    const count = document.createElement("span");
+    count.className = "tool-tier";
+    count.textContent = `${team.tool_count} tools`;
+    nameRow.appendChild(name);
+    nameRow.appendChild(count);
+
+    const desc = document.createElement("div");
+    desc.className = "tool-desc";
+    desc.textContent = team.scope_prompt;
+
+    const addr = document.createElement("div");
+    addr.className = "tool-desc";
+    addr.textContent = `Address directly with: "ask the ${team.aliases[0]}..."`;
+
+    entry.appendChild(nameRow);
+    entry.appendChild(desc);
+    entry.appendChild(addr);
+    els.teamsBody.appendChild(entry);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Skill review queue (Phase 5) — proposed skills need Devin's explicit approve/edit/
 // reject before they're eligible to run; this panel is the only client-facing path to
 // those actions, mirroring the server's own "only a connected device can trigger this"
@@ -806,10 +876,10 @@ function appendAssistantBubble(text) {
   scrollToBottom();
 }
 
-function appendToolNote(text) {
+function appendToolNote(text, extraClass) {
   clearEmptyState();
   const note = document.createElement("div");
-  note.className = "tool-note";
+  note.className = extraClass ? `tool-note ${extraClass}` : "tool-note";
   note.textContent = text;
   els.messages.appendChild(note);
   scrollToBottom();

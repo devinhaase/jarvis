@@ -50,23 +50,47 @@ with open("SOUL.md", encoding="utf-8") as f:
     check("llm.PERSONA content matches SOUL.md verbatim", llm.PERSONA == f.read())
 
 import memory_docs
-_tmp_data = tempfile.mkdtemp()
 from memory import Memory
-test_mem = Memory(data_dir=_tmp_data)
-test_mem.append_fact("Devin's test lab uses a Raspberry Pi cluster.")
-test_mem.update_semantic("preferences", {"reply_style": "terse"})
 
-# memory_docs writes to the project root by design (USER.md/MEMORY.md sit next to SOUL.md,
-# not buried in data/) — verify against the real paths it actually used.
-check("USER.md exists after a preference update", os.path.exists(memory_docs.USER_MD_PATH))
-check("MEMORY.md exists after a fact append", os.path.exists(memory_docs.MEMORY_MD_PATH))
+# Real bug found (and fixed) while committing this session's work: memory_docs.py's output
+# paths are fixed at the project root, so a Memory instance built with a non-default
+# data_dir (every isolated test in this codebase does this on purpose) was overwriting the
+# REAL USER.md/MEMORY.md with test data. Fixed by gating _sync_memory_docs() to only fire
+# for the real, default-data_dir instance — verify that gate holds first...
+_tmp_data = tempfile.mkdtemp()
 with open(memory_docs.USER_MD_PATH, encoding="utf-8") as f:
-    user_content = f.read()
-with open(memory_docs.MEMORY_MD_PATH, encoding="utf-8") as f:
-    memory_content = f.read()
-check("USER.md reflects the real preference just set", "terse" in user_content, f"got: {user_content}")
-check("MEMORY.md reflects the real fact just appended", "Raspberry Pi cluster" in memory_content, f"got: {memory_content}")
+    real_user_md_before = f.read()
+test_mem = Memory(data_dir=_tmp_data)
+test_mem.append_fact("this fact must never reach the real MEMORY.md")
+test_mem.update_semantic("preferences", {"reply_style": "this must never reach the real USER.md"})
+with open(memory_docs.USER_MD_PATH, encoding="utf-8") as f:
+    real_user_md_after = f.read()
+check("a non-default-data_dir Memory instance does NOT touch the real USER.md/MEMORY.md",
+      real_user_md_before == real_user_md_after)
 shutil.rmtree(_tmp_data, ignore_errors=True)
+
+# ...then verify memory_docs.py's own rendering logic directly (its actual job), against
+# isolated output paths rather than the real project-root files.
+_real_user_md_path, _real_memory_md_path = memory_docs.USER_MD_PATH, memory_docs.MEMORY_MD_PATH
+_tmp_docs_dir = tempfile.mkdtemp()
+memory_docs.USER_MD_PATH = os.path.join(_tmp_docs_dir, "USER.md")
+memory_docs.MEMORY_MD_PATH = os.path.join(_tmp_docs_dir, "MEMORY.md")
+try:
+    memory_docs.regenerate({
+        "user_name": "Devin", "facts": ["Devin's test lab uses a Raspberry Pi cluster."],
+        "projects": [], "preferences": {"reply_style": "terse"},
+    })
+    check("USER.md written to the (isolated) target path", os.path.exists(memory_docs.USER_MD_PATH))
+    check("MEMORY.md written to the (isolated) target path", os.path.exists(memory_docs.MEMORY_MD_PATH))
+    with open(memory_docs.USER_MD_PATH, encoding="utf-8") as f:
+        user_content = f.read()
+    with open(memory_docs.MEMORY_MD_PATH, encoding="utf-8") as f:
+        memory_content = f.read()
+    check("USER.md reflects the preference just rendered", "terse" in user_content, f"got: {user_content}")
+    check("MEMORY.md reflects the fact just rendered", "Raspberry Pi cluster" in memory_content, f"got: {memory_content}")
+finally:
+    memory_docs.USER_MD_PATH, memory_docs.MEMORY_MD_PATH = _real_user_md_path, _real_memory_md_path
+    shutil.rmtree(_tmp_docs_dir, ignore_errors=True)
 
 # ---------------------------------------------------------------------------
 section("1. skills.py — CRUD, tier capping, versioning, outcome tracking/flagging")

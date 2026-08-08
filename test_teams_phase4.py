@@ -416,6 +416,19 @@ async def main():
           "authorized_targets" in tool_result_text.lower() and "NOT in your authorized targets" in tool_result_text,
           f"got: {tool_result_text!r}")
 
+    section("6. Teams panel — list_teams over the real WS protocol")
+    async with websockets.connect(WS_URL) as ws:
+        await hello(ws, DEVICE_ID, DEVICE_TOKEN, ["filesystem"])
+        await ws.send(json.dumps({"type": "list_teams"}))
+        resp = json.loads(await ws.recv())
+    check("list_teams returns type=team_list", resp.get("type") == "team_list", f"got: {resp}")
+    returned_keys = {t["key"] for t in resp.get("teams", [])}
+    check("all 5 teams present", returned_keys == {"personal_assistant", "network", "it", "cybersecurity", "hacking"},
+          f"got: {returned_keys}")
+    for t in resp.get("teams", []):
+        check(f"[{t['key']}] has a positive tool_count", t["tool_count"] > 0, f"got: {t}")
+        check(f"[{t['key']}] has at least one address alias", len(t.get("aliases", [])) > 0)
+
 
 asyncio.run(main())
 

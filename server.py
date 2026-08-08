@@ -272,6 +272,21 @@ def _skill_to_dict(skill) -> dict:
     }
 
 
+def _team_catalog() -> list:
+    """The 5 subagent teams (Phase 4), for the GUI's Teams panel — same read-only,
+    nothing-secret posture as _tool_catalog(). tool_count uses each team's live
+    tool_names() (owned + coordinator-level) rather than a static number, so it never
+    drifts from what a team can actually call."""
+    from teams import TEAMS
+    return [
+        {
+            "key": key, "name": team.display_name, "scope_prompt": team.scope_prompt,
+            "tool_count": len(team.tool_names()), "aliases": team.aliases,
+        }
+        for key, team in TEAMS.items()
+    ]
+
+
 def _tool_catalog() -> list:
     """Everything Jarvis can do, for the GUI's Tools panel — read-only, no secrets, just
     what's already visible in the system prompt anyway (get_tool_descriptions() in llm.py)."""
@@ -621,6 +636,10 @@ async def websocket_endpoint(websocket: WebSocket):
 
             if mtype == "list_tools":
                 await websocket.send_json({"type": "tool_list", "tools": _tool_catalog()})
+                continue
+
+            if mtype == "list_teams":
+                await websocket.send_json({"type": "team_list", "teams": _team_catalog()})
                 continue
 
             # ------------------------------------------------------------ Phase 5: skill review queue --

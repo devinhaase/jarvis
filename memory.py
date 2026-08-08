@@ -53,7 +53,18 @@ class Memory:
         """Phase 5: keep USER.md/MEMORY.md (human-readable renderings) in step with every
         semantic memory write. Best-effort — a rendering failure must never break the
         actual persisted fact/preference, which is why this is separated from the json.dump
-        calls above rather than interleaved with them."""
+        calls above rather than interleaved with them.
+
+        Real bug found (and fixed here) while reviewing this session's own commit diff:
+        memory_docs.py's output paths are fixed at the project root — a Memory instance
+        constructed with a non-default data_dir (every isolated test in this codebase does
+        this deliberately, to avoid touching real state) was still overwriting the REAL
+        USER.md/MEMORY.md with test data, since regenerate() has no idea which Memory
+        instance called it. Only sync for the real, default-data_dir instance — a test
+        instance's docs simply don't get rendered, which is correct: they're not the ones
+        SOUL.md's neighbors are supposed to reflect anyway."""
+        if self.data_dir != "data":
+            return
         try:
             from memory_docs import regenerate
             regenerate(self.semantic_memory)

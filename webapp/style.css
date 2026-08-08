@@ -314,6 +314,12 @@ html, body {
   padding: 2px 24px;
 }
 
+.team-note {
+  color: var(--accent);
+  font-style: normal;
+  font-weight: 500;
+}
+
 .empty-state {
   margin: auto;
   text-align: center;
