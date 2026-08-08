@@ -86,11 +86,18 @@ def scan_local_logs(timeframe_minutes=60):
 
 def run_local_script(command, args=""):
     try:
+        from security_hardening import run_hardened
         full_cmd = f"{command} {args}".strip()
-        out = subprocess.check_output(["powershell", "-Command", full_cmd], text=True, stderr=subprocess.STDOUT)
-        return out.strip() if out.strip() else "Command executed successfully with no output."
-    except subprocess.CalledProcessError as e:
-        return f"Command failed with exit code {e.returncode}\nOutput: {e.output}"
+        # Hardened (Phase 8): the child gets a minimal env, not this process's full
+        # environment (which includes any API keys loaded from .env) — this tool takes
+        # free-form, potentially LLM-composed input, the highest-risk shell surface here.
+        result = run_hardened(["powershell", "-Command", full_cmd])
+        out = ((result.stdout or "") + (result.stderr or "")).strip()
+        if result.returncode != 0:
+            return f"Command failed with exit code {result.returncode}\nOutput: {out}"
+        return out if out else "Command executed successfully with no output."
+    except subprocess.TimeoutExpired:
+        return "Command timed out after 60 seconds."
 
 def forced_error_tool():
     raise Exception("Simulated connection timeout to log server")
@@ -176,6 +183,32 @@ try:
     ops_tools["move_or_rename_path"] = Tool("move_or_rename_path", "Move or rename a local file/directory — refuses if the destination already exists", Tier.TIER_3, move_or_rename_path)
 except Exception:
     pass  # File tools unavailable — Jarvis continues without them
+
+try:
+    from security_hardening import arm_kill_switch, disarm_kill_switch, kill_switch_status, run_self_audit
+
+    ops_tools["arm_kill_switch"] = Tool(
+        "arm_kill_switch",
+        "EMERGENCY STOP: immediately refuse every Tier 2+ tool call until disarmed. Takes an "
+        "optional 'reason'. Always Tier 1 itself — stopping must never be blocked by anything.",
+        Tier.TIER_1, arm_kill_switch,
+    )
+    ops_tools["disarm_kill_switch"] = Tool(
+        "disarm_kill_switch", "Turn the kill switch back off, resuming normal tool execution.",
+        Tier.TIER_2, disarm_kill_switch,
+    )
+    ops_tools["kill_switch_status"] = Tool(
+        "kill_switch_status", "Check whether the kill switch is currently armed and why.",
+        Tier.TIER_1, kill_switch_status,
+    )
+    ops_tools["run_self_audit"] = Tool(
+        "run_self_audit",
+        "Read-only audit of Jarvis's own security hardening: kill switch state, whether "
+        "credential files are accidentally tracked in git, registered device count/staleness.",
+        Tier.TIER_1, run_self_audit, role="defense",
+    )
+except Exception:
+    pass  # Hardening tools unavailable — Jarvis continues without them
 
 ALL_TOOLS = {**assistant_tools, **ops_tools}
 
@@ -335,4 +368,5 @@ REQUIRES_CAPABILITY = {
     "list_directory": "filesystem",
     "write_local_file": "filesystem",
     "move_or_rename_path": "filesystem",
+    "run_self_audit": "filesystem",  # shells to git ls-files, reads devices.json
 }

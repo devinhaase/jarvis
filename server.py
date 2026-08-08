@@ -80,6 +80,7 @@ from tools import Tier, ALL_TOOLS
 from session_manager import JarvisBrain
 from device_registry import DeviceRegistry
 from conversation_store import store
+from security_hardening import AuthRateLimiter
 
 WEBAPP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "webapp")
 WEB_GUI_DEVICE_ID = "web-gui"
@@ -89,6 +90,7 @@ APPROVAL_TIMEOUT = {"TIER_3": 3.0, "TIER_4": 60.0}
 APPROVAL_DEFAULT = {"TIER_3": True, "TIER_4": False}  # what happens if nobody answers in time
 
 registry = DeviceRegistry()
+_auth_limiter = AuthRateLimiter()  # Phase 8: lockout after repeated failed device-auth attempts
 shared_memory = Memory()  # the one long-term memory every session reads/writes
 
 
@@ -407,11 +409,25 @@ async def websocket_endpoint(websocket: WebSocket):
     token = hello.get("token", "")
     requested_caps = set(hello.get("capabilities", []))
 
+    # Phase 8: rate-limit auth attempts per source IP before even checking the token —
+    # devices.json tokens are compared in constant time (no timing side-channel) but that
+    # alone never stopped unlimited guessing. Keyed by IP, not device_id, since a bad guess
+    # doesn't reliably know a real device_id either.
+    client_host = websocket.client.host if websocket.client else "unknown"
+    locked_until = _auth_limiter.is_locked(client_host)
+    if locked_until:
+        wait_s = int(locked_until - time.time())
+        await websocket.send_json({"type": "error", "message": f"Too many failed auth attempts. Try again in {wait_s}s."})
+        await websocket.close(code=4429, reason="Rate limited")
+        return
+
     allowed_caps = registry.validate(device_id, token)
     if allowed_caps is None:
+        _auth_limiter.record_failure(client_host)
         await websocket.send_json({"type": "error", "message": "Unknown device or invalid token."})
         await websocket.close(code=4001, reason="Unauthorized")
         return
+    _auth_limiter.record_success(client_host)
 
     # Never trust what the client claims beyond what this device was registered for.
     capabilities = list(requested_caps & set(allowed_caps))

@@ -19,8 +19,28 @@ from tools import ALL_TOOLS, Tier
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Confirm
+from security_hardening import is_kill_switch_armed, kill_switch_status, redact, KillSwitchActive
 
 console = Console()
+
+
+_KILL_SWITCH_EXEMPT = {"disarm_kill_switch"}  # must always be reachable, or arming it is one-way
+
+
+def _check_kill_switch(tool):
+    """Phase 8: the kill switch is checked at the same dispatch point offense-authorization
+    already is — a single choke point every execution path goes through, not something a
+    caller could bypass by calling a different entrypoint. Tier 1 (read-only) tools still
+    run while armed — the point is to stop *actions*, not to also break the ability to ask
+    Jarvis what's going on. disarm_kill_switch is exempt regardless of its own tier — a
+    Tier-2 tool that the kill switch itself blocks would make arming it a one-way door."""
+    if tool.tier == Tier.TIER_1 or tool.name in _KILL_SWITCH_EXEMPT or not is_kill_switch_armed():
+        return
+    status = kill_switch_status()
+    raise KillSwitchActive(
+        f"Kill switch is ARMED (reason: {status.get('reason', '?')}) — "
+        f"'{tool.name}' (Tier {tool.tier.name}) was refused. Call disarm_kill_switch to resume."
+    )
 
 # Common parameter names offense-tagged tools use for "the thing being scanned/queried" —
 # scan_ports/run_recon_pipeline use "target", shodan_lookup uses "query", dns_recon/
@@ -107,6 +127,14 @@ class Coordinator:
             # 1. REASON
             console.print(f"\n[bold magenta]🤔 Reason:[/bold magenta] Using [bold]{tool_name}[/bold] (Tier {tool.tier.name})")
 
+            try:
+                _check_kill_switch(tool)
+            except KillSwitchActive as e:
+                console.print(f"[bold red]🛑 Kill switch:[/bold red] {e}")
+                self.memory.log_episode(tool_name, str(e), tool.tier.name)
+                results_summary += f"{tool_name}: {e}\n"
+                break
+
             # 2. ACT
             if not self._request_approval(tool_name, tool.tier):
                 msg = f"Execution of '{tool_name}' denied/cancelled by user."
@@ -126,7 +154,7 @@ class Coordinator:
                 with console.status(f"[bold green]Running {tool_name}...[/bold green]", spinner="dots"):
                     result = tool.execute(**args)
 
-                safe_result_str = str(result).encode('ascii', 'ignore').decode('ascii')
+                safe_result_str = redact(str(result).encode('ascii', 'ignore').decode('ascii'))
                 display_str = safe_result_str[:1200] + "\n...[truncated]" if len(safe_result_str) > 1200 else safe_result_str
                 console.print(f"[bold green]👀 Observe:[/bold green]\n{display_str}")
                 self.memory.log_episode(tool_name, safe_result_str, tool.tier.name)
@@ -158,6 +186,13 @@ class Coordinator:
 
         console.print(f"\n[bold magenta]🤔 Reason:[/bold magenta] Using [bold]{tool_name}[/bold] (Tier {tool.tier.name})")
 
+        try:
+            _check_kill_switch(tool)
+        except KillSwitchActive as e:
+            console.print(f"[bold red]🛑 Kill switch:[/bold red] {e}")
+            self.memory.log_episode(tool_name, str(e), tool.tier.name)
+            return None
+
         if not self._request_approval(tool_name, tool.tier):
             msg = f"Execution of '{tool_name}' denied/cancelled by user."
             console.print(f"[bold red]⛔ Act:[/bold red] {msg}")
@@ -168,7 +203,7 @@ class Coordinator:
             _check_offense_authorization(tool, args)
             with console.status(f"[bold green]Running {tool_name}...[/bold green]", spinner="dots"):
                 result = tool.execute(**args)
-            safe_result_str = str(result).encode('ascii', 'ignore').decode('ascii')
+            safe_result_str = redact(str(result).encode('ascii', 'ignore').decode('ascii'))
             self.memory.log_episode(tool_name, safe_result_str, tool.tier.name)
             return result
         except Exception as e:
