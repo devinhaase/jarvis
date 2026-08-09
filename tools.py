@@ -86,9 +86,27 @@ def check_system_health():
 
 def scan_local_logs(timeframe_minutes=60):
     try:
-        # Get up to 5 recent Errors (Level 2) or Warnings (Level 3) from System/App logs
-        cmd = f"Get-WinEvent -FilterHashtable @{{LogName='System','Application'; Level=2,3; StartTime=(Get-Date).AddMinutes(-{timeframe_minutes})}} -MaxEvents 5 -ErrorAction SilentlyContinue | Select-Object TimeCreated, Message | Format-Table -HideTableHeaders"
-        out = subprocess.check_output(["powershell", "-Command", cmd], text=True).strip()
+        # Get up to 5 recent Errors (Level 2) or Warnings (Level 3) from System/App logs.
+        # Real bug found live (Devin reported a false "access denied" — Jarvis had
+        # misread a generic, contentless error and guessed a cause): Get-WinEvent treats
+        # "zero events matched the filter" as a terminating error — even under
+        # -ErrorAction SilentlyContinue, the pipeline still exits non-zero — and that's a
+        # completely normal, good-news outcome ("nothing broke recently"), not a real
+        # failure. subprocess.check_output only captures stdout, so on any non-zero exit
+        # the actual PowerShell error text (which plainly says "No events were found
+        # that match the specified selection criteria") was thrown away entirely, leaving
+        # only "returned non-zero exit status 1" for the model to interpret — which it
+        # then had to guess an explanation for, and guessed wrong. Fixed by using run()
+        # with stderr captured, and checking for that specific benign case by name
+        # (NoMatchingEventsFound) before treating anything else as a real error.
+        cmd = f"Get-WinEvent -FilterHashtable @{{LogName='System','Application'; Level=2,3; StartTime=(Get-Date).AddMinutes(-{timeframe_minutes})}} -MaxEvents 5 -ErrorAction Stop | Select-Object TimeCreated, Message | Format-Table -HideTableHeaders"
+        result = subprocess.run(["powershell", "-Command", cmd], capture_output=True, text=True)
+        if result.returncode != 0:
+            stderr = (result.stderr or "").strip()
+            if "NoMatchingEventsFound" in stderr or "No events were found" in stderr:
+                return ["No recent errors or warnings found."]
+            return [f"Failed to read logs: {stderr or 'unknown PowerShell error (exit code %d)' % result.returncode}"]
+        out = (result.stdout or "").strip()
         if not out:
             return ["No recent errors or warnings found."]
         return [line.strip() for line in out.split('\n') if line.strip()]
