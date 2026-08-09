@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/jarvis_bg">
+
+    <WebView
+        android:id="@+id/webView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- Always-reachable settings entry point — the error overlay's own Settings button
+         (below) only ever shows when disconnected; editing the address to fix a *wrong*
+         one (as opposed to a temporarily-down server) needs to be reachable even while
+         everything looks fine, per the spec's own "editable without a rebuild" requirement.
+
+         Bottom-right, floating, with its own solid circular background and elevation
+         (standard Android FAB visual language) — NOT top-right. Real collision found live:
+         Jarvis's own web header already has an export button in that exact corner
+         (webapp/index.html's #exportBtn), and a flat transparent-background icon sitting
+         right next to it read as part of the page's own header row instead of a distinct
+         native control. Bottom-right still isn't guaranteed collision-free against every
+         possible page state, but a solid FAB is at least unambiguous as "not part of the
+         web page" wherever it lands, and this corner is clear of the composer's own icons
+         (attach/folder/mic/send all sit further left/center). -->
+    <ImageButton
+        android:id="@+id/settingsIconButton"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:layout_gravity="bottom|end"
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="72dp"
+        android:background="@drawable/settings_fab_background"
+        android:contentDescription="@string/btn_settings"
+        android:src="@android:drawable/ic_menu_manage"
+        android:tint="@color/jarvis_text"
+        android:elevation="4dp"
+        android:padding="10dp" />
+
+    <!-- Same role as desktop_app's SPLASH_HTML — shown while resolving/connecting, and on
+         a genuine failure, instead of a blank WebView or a browser-style error page. -->
+    <LinearLayout
+        android:id="@+id/statusOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/jarvis_bg"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:padding="32dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/app_name"
+            android:textColor="@color/jarvis_text"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.1" />
+
+        <ProgressBar
+            android:id="@+id/progressSpinner"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:indeterminateTint="@color/jarvis_accent" />
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/status_connecting"
+            android:textColor="@color/jarvis_text_dim"
+            android:textSize="14sp"
+            android:gravity="center" />
+
+        <Button
+            android:id="@+id/retryButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="@string/btn_retry"
+            android:visibility="gone" />
+
+        <Button
+            android:id="@+id/settingsButtonFromError"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="@string/btn_settings"
+            android:visibility="gone"
+            style="?android:attr/borderlessButtonStyle"
+            android:textColor="@color/jarvis_text_dim" />
+
+    </LinearLayout>
+
+</FrameLayout>

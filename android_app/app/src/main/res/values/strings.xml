@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Jarvis</string>
+    <string name="settings_title">Connection Settings</string>
+
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_trying_local">Trying %1$s…</string>
+    <string name="status_trying_vpn">Trying %1$s (VPN)…</string>
+    <string name="status_unreachable">Can\'t reach %1$s — check your connection or VPN.</string>
+    <string name="status_unreachable_wol_tried">Can\'t reach %1$s, even after trying to wake it — check it\'s powered on and Wake-on-LAN is enabled.</string>
+    <string name="status_unreachable_no_wol">Can\'t reach %1$s over VPN. It may be asleep — Wake-on-LAN only works from the same home network, not remotely, unless your router is configured to relay it.</string>
+    <string name="btn_retry">Retry</string>
+    <string name="btn_settings">Settings</string>
+
+    <string name="settings_label_connected_via">Connected via</string>
+    <string name="settings_label_local">Local address (home wifi)</string>
+    <string name="settings_label_vpn">VPN domain (HTTPS, Tailscale)</string>
+    <string name="settings_label_computer_name">Main computer name</string>
+    <string name="settings_hint_local">e.g. 192.168.1.147:8765</string>
+    <string name="settings_hint_vpn">e.g. ai.dhaaselab.com</string>
+    <string name="btn_save">Save</string>
+
+    <string name="mic_rationale_title">Microphone access</string>
+    <string name="mic_rationale_body">Jarvis uses your microphone for voice input and the wake-word feature, same as the web version. Nothing is recorded until you actually use voice.</string>
+    <string name="mic_rationale_continue">Continue</string>
+    <string name="mic_rationale_not_now">Not now</string>
+</resources>

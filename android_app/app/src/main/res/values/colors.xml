@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches ../webapp/manifest.json's PWA chrome colors — same brand across web, desktop, Android. -->
+    <color name="jarvis_bg">#1A1A1E</color>
+    <color name="jarvis_accent">#0A84FF</color>
+    <color name="jarvis_text">#ECECEE</color>
+    <color name="jarvis_text_dim">#96969E</color>
+    <color name="jarvis_danger">#FF6B6F</color>
+</resources>

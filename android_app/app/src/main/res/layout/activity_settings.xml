@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/jarvis_bg">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/settings_label_connected_via"
+            android:textColor="@color/jarvis_text_dim"
+            android:textSize="12sp"
+            android:textAllCaps="true"
+            android:letterSpacing="0.05" />
+
+        <TextView
+            android:id="@+id/connectedViaText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="24dp"
+            android:text="—"
+            android:textColor="@color/jarvis_accent"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/settings_label_computer_name"
+            android:textColor="@color/jarvis_text_dim"
+            android:textSize="12sp" />
+        <EditText
+            android:id="@+id/computerNameInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@color/jarvis_text"
+            android:inputType="text"
+            android:layout_marginBottom="18dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/settings_label_local"
+            android:textColor="@color/jarvis_text_dim"
+            android:textSize="12sp" />
+        <EditText
+            android:id="@+id/localAddressInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/settings_hint_local"
+            android:textColor="@color/jarvis_text"
+            android:textColorHint="@color/jarvis_text_dim"
+            android:inputType="textUri"
+            android:layout_marginBottom="18dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/settings_label_vpn"
+            android:textColor="@color/jarvis_text_dim"
+            android:textSize="12sp" />
+        <EditText
+            android:id="@+id/vpnAddressInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/settings_hint_vpn"
+            android:textColor="@color/jarvis_text"
+            android:textColorHint="@color/jarvis_text_dim"
+            android:inputType="textUri"
+            android:layout_marginBottom="24dp" />
+
+        <Button
+            android:id="@+id/saveButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/btn_save" />
+
+    </LinearLayout>
+</ScrollView>

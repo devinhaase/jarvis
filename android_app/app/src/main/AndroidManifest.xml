@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Reaching the main computer over the LAN or Tailscale — the whole point of this app. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+
+    <!-- Tier 8: the actual OS-level grant. Requesting this alone gets Jarvis into System
+         Settings' permission list and satisfies the runtime prompt — it does NOT by itself
+         make the WebView's own getUserMedia() calls work; WebChromeClient.onPermissionRequest
+         still has to explicitly grant the resource once this is held (see MainActivity),
+         same two-piece shape the spec calls out. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Tier 10: required on Android 13+ (API 33) to show ANY notification at all — a real,
+         easy-to-forget separate permission from RECORD_AUDIO, requested at runtime in
+         MainActivity the same way (see ensureNotificationPermission()). Below API 33 this
+         permission is granted automatically at install time, no runtime prompt needed. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
+        android:theme="@style/Theme.Jarvis"
+        android:usesCleartextTraffic="true">
+        <!-- usesCleartextTraffic: the main computer is reached over plain http:// on the
+             local LAN and over the Tailscale tunnel (which is already encrypted at the
+             WireGuard layer, same reasoning the desktop app's own HTTP-to-localhost traffic
+             never needed TLS) — not a public internet-facing connection, so Android's
+             default HTTPS-only cleartext block would otherwise silently break every
+             connection this app makes. -->
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:launchMode="singleTop">
+            <!-- singleTop: a notification tap (Tier 10) re-uses the already-running
+                 MainActivity via onNewIntent() instead of stacking a second instance —
+                 without this, tapping a notification while the app is already open would
+                 leave two MainActivity instances alive, each with its own WebView. -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="false"
+            android:label="@string/settings_title" />
+
+        <!-- Tier 10: only ever actually reached if google-services.json is present — the
+             FCM SDK itself no-ops without a real FirebaseApp to bind to, so declaring this
+             unconditionally (rather than in some conditional manifest variant) is safe. -->
+        <service
+            android:name=".JarvisFirebaseMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+    </application>
+</manifest>
