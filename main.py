@@ -546,13 +546,13 @@ def main():
             table.add_column("Scope", style="white", max_width=50)
             table.add_column("Address with", style="dim")
             for key, team in TEAMS.items():
-                # A terminal table column has real width limits a browser modal doesn't —
-                # first sentence only, full scope_prompt is what the GUI's own Teams panel
-                # already shows for anyone who wants the complete text.
-                first_sentence = team.scope_prompt.split(". ", 1)[0].strip().rstrip(".") + "."
+                # user_summary, not scope_prompt — scope_prompt is written as an instruction
+                # to the model itself ("You are the Network team..."), not something to show
+                # a person; same fix applied to the GUI's Teams panel (see server.py's
+                # _team_catalog()).
                 table.add_row(
                     f"{TEAM_ICON.get(key, '🤖')} {team.display_name}",
-                    str(len(team.tool_names())), first_sentence,
+                    str(len(team.tool_names())), team.user_summary,
                     f'"ask the {team.aliases[0]}..."' if team.aliases else "",
                 )
             console.print(table)

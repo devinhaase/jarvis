@@ -614,6 +614,13 @@ els.toolsBtn.addEventListener("click", () => {
 });
 els.toolsCloseBtn.addEventListener("click", () => els.toolsModal.classList.add("hidden"));
 
+// snake_case tool name -> "Title Case" for display — the raw function name (e.g.
+// "add_reference_material") is what the model calls internally, never something a person
+// reading the Tools panel should have to parse themselves.
+function humanizeToolName(name) {
+  return name.split("_").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+}
+
 function renderToolsModal(tools) {
   els.toolsBody.innerHTML = "";
   let lastGroup = null;
@@ -622,7 +629,9 @@ function renderToolsModal(tools) {
     if (group !== lastGroup) {
       const heading = document.createElement("div");
       heading.className = "tool-group-title";
-      heading.textContent = group.toUpperCase();
+      // Friendly team name (e.g. "Personal Assistant"), not the raw role key
+      // ("personal_assistant") or "GENERAL" for coordinator-level tools with no team.
+      heading.textContent = group === "general" ? "AVAILABLE TO EVERY TEAM" : (TEAM_LABEL[group] || group).toUpperCase();
       els.toolsBody.appendChild(heading);
       lastGroup = group;
     }
@@ -631,10 +640,10 @@ function renderToolsModal(tools) {
     const nameRow = document.createElement("div");
     const name = document.createElement("span");
     name.className = "tool-name";
-    name.textContent = tool.name;
+    name.textContent = humanizeToolName(tool.name);
     const tier = document.createElement("span");
     tier.className = "tool-tier";
-    tier.textContent = tool.tier;
+    tier.textContent = tool.tier;  // already a plain-English label from the server
     nameRow.appendChild(name);
     nameRow.appendChild(tier);
     const desc = document.createElement("div");
@@ -684,7 +693,7 @@ function renderTeamsModal(teamList) {
 
     const desc = document.createElement("div");
     desc.className = "tool-desc";
-    desc.textContent = team.scope_prompt;
+    desc.textContent = team.description;  // plain-English summary, not the raw LLM prompt
 
     const addr = document.createElement("div");
     addr.className = "tool-desc";
@@ -847,13 +856,21 @@ function renderSkillsModal(skillList) {
       name.textContent = skill.name + (skill.flagged ? " ⚠" : "");
       const tier = document.createElement("span");
       tier.className = "tool-tier";
-      tier.textContent = `${skill.tier} · v${skill.version}`;
+      tier.textContent = `${skill.tier} · v${skill.version}`;  // tier already a plain-English label from the server
       nameRow.appendChild(name);
       nameRow.appendChild(tier);
 
       const desc = document.createElement("div");
       desc.className = "tool-desc";
-      desc.textContent = `${skill.when_to_use} — steps: ${skill.steps.join(" -> ")} — tools: ${skill.tools.join(", ")}`;
+      // Dropped the old raw "— tools: move_or_rename_path, run_local_script" trailer —
+      // internal function names, redundant with steps below. A generated-script path
+      // (data\synthesized_tools\...\.py, from a "synth:" skill) is collapsed to a plain
+      // phrase for the same reason: a file path on disk means nothing to read in a list,
+      // it's not something you'd click here anyway.
+      const readableSteps = skill.steps
+        .map(s => s.replace(/[\w:\\\/.]*synthesized_tools[\w:\\\/.]*\.py/i, "a script Jarvis wrote and reviewed"))
+        .join(" → ");
+      desc.textContent = `${skill.when_to_use} — steps: ${readableSteps}`;
 
       const stats = document.createElement("div");
       stats.className = "tool-desc";

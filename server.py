@@ -361,9 +361,21 @@ def make_approval_fn():
     return approval_fn
 
 
+# Tier -> a plain-English label for the GUI (Tools/Skills panels), replacing the raw
+# "TIER_2" enum name that used to show there (real complaint: "these buttons dont make
+# sense" — a tier code means nothing without already knowing this project's own tier
+# system). Matches tools.py's own Tier comments (Read-only / Reversible-Logged /
+# Notify-then-act / Confirmation required) in fewer words.
+_TIER_LABEL = {
+    "TIER_1": "Read-only", "TIER_2": "Makes changes", "TIER_3": "Notifies you first",
+    "TIER_4": "Needs your approval",
+}
+
+
 def _skill_to_dict(skill) -> dict:
     return {
-        "name": skill.name, "status": skill.status, "tier": skill.tier, "team": skill.team,
+        "name": skill.name, "status": skill.status,
+        "tier": _TIER_LABEL.get(skill.tier, skill.tier), "team": skill.team,
         "version": skill.version, "success_count": skill.success_count, "fail_count": skill.fail_count,
         "flagged": skill.flagged, "when_to_use": skill.when_to_use, "steps": skill.steps,
         "tools": skill.tools, "created_at": skill.created_at, "updated_at": skill.updated_at,
@@ -374,11 +386,14 @@ def _team_catalog() -> list:
     """The 5 subagent teams (Phase 4), for the GUI's Teams panel — same read-only,
     nothing-secret posture as _tool_catalog(). tool_count uses each team's live
     tool_names() (owned + coordinator-level) rather than a static number, so it never
-    drifts from what a team can actually call."""
+    drifts from what a team can actually call. Sends user_summary (written for a human
+    reading the panel), never scope_prompt (written as an instruction to the model itself
+    — showing that verbatim in the GUI was the actual bug Devin flagged: "make sense", not
+    read like the app talking to itself)."""
     from teams import TEAMS
     return [
         {
-            "key": key, "name": team.display_name, "scope_prompt": team.scope_prompt,
+            "key": key, "name": team.display_name, "description": team.user_summary,
             "tool_count": len(team.tool_names()), "aliases": team.aliases,
         }
         for key, team in TEAMS.items()
@@ -519,10 +534,16 @@ def _team_dashboard(team_key: str) -> dict:
 
 def _tool_catalog() -> list:
     """Everything Jarvis can do, for the GUI's Tools panel — read-only, no secrets, just
-    what's already visible in the system prompt anyway (get_tool_descriptions() in llm.py)."""
+    what's already visible in the system prompt anyway (get_tool_descriptions() in llm.py).
+    Excludes error_tool (team=None, tier read-only) — a test-only utility that forces an
+    error on purpose, not a real capability, so it has no place in a user-facing list."""
     return sorted((
-        {"name": name, "description": tool.description, "tier": tool.tier.name, "role": tool.role}
+        {
+            "name": name, "description": tool.description,
+            "tier": _TIER_LABEL.get(tool.tier.name, tool.tier.name), "role": tool.role,
+        }
         for name, tool in ALL_TOOLS.items()
+        if name != "error_tool"
     ), key=lambda t: (t["role"] or "", t["name"]))
 
 

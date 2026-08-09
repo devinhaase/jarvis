@@ -17,11 +17,17 @@ from tools import ALL_TOOLS
 
 
 class Team:
-    def __init__(self, key: str, display_name: str, aliases: list, scope_prompt: str):
+    def __init__(self, key: str, display_name: str, aliases: list, scope_prompt: str, user_summary: str):
         self.key = key
         self.display_name = display_name
         self.aliases = aliases  # lowercase phrases that address this team explicitly
         self.scope_prompt = scope_prompt
+        # A plain-English, one-sentence description for the GUI's Teams panel — deliberately
+        # NOT the same text as scope_prompt. scope_prompt is written as an instruction *to*
+        # the model ("You are the Network team. You own..."); showing that verbatim to a
+        # human reads as the app talking to itself. user_summary is written *for* a person
+        # reading the panel instead.
+        self.user_summary = user_summary
 
     def tool_names(self) -> set:
         """Live-computed, not cached at import time — a tool registered/deregistered at
@@ -60,6 +66,10 @@ TEAMS = {
             "system administration, network, or security tools — if a request needs those, "
             "say so plainly rather than attempting a workaround."
         ),
+        user_summary=(
+            "Handles email, tasks and reminders, notes, and web search — and remembers "
+            "what you've talked about before."
+        ),
     ),
     "network": Team(
         "network", "Network",
@@ -72,6 +82,10 @@ TEAMS = {
             "in your answer; a separate step (not you) escalates that to the Cybersecurity "
             "team when it needs one. You have no tools that change live network config."
         ),
+        user_summary=(
+            "Finds devices on your network, checks connection speed and latency, and flags "
+            "anything unusual — it only looks, it never changes your network settings."
+        ),
     ),
     "it": Team(
         "it", "IT",
@@ -81,6 +95,10 @@ TEAMS = {
             "operations, usage/cost tracking, and scheduled maintenance. If you notice a "
             "patch gap or configuration drift, describe it plainly — escalating it to the "
             "Cybersecurity team is a separate step, not something you do yourself."
+        ),
+        user_summary=(
+            "Keeps an eye on this computer's health, manages backups and files, and handles "
+            "routine maintenance."
         ),
     ),
     "cybersecurity": Team(
@@ -94,6 +112,10 @@ TEAMS = {
             "testing, that's the Hacking team's job, and it only proceeds with Devin's "
             "explicit approval, never on your recommendation alone."
         ),
+        user_summary=(
+            "Watches for security problems — breached passwords, vulnerable software, "
+            "unusual activity — and decides when something needs a closer look."
+        ),
     ),
     "hacking": Team(
         "hacking", "Hacking",
@@ -104,6 +126,10 @@ TEAMS = {
             "— if a target isn't listed, refuse and tell Devin exactly what to add and how, "
             "don't attempt it and don't pick a substitute target. You report findings, you "
             "do not decide remediation — that belongs to the Cybersecurity team."
+        ),
+        user_summary=(
+            "Runs real security tests (like port scans) — but only against targets you've "
+            "explicitly authorized, and only when Cybersecurity calls for it."
         ),
     ),
 }
