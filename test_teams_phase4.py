@@ -63,8 +63,8 @@ check("all 5 teams registered", set(teams.TEAMS.keys()) ==
 for key, team in teams.TEAMS.items():
     names = team.tool_names()
     check(f"'{key}' team has at least one tool", len(names) > 0, f"got {len(names)}")
-    check(f"'{key}' team includes coordinator-level tools (e.g. arm_kill_switch)",
-          "arm_kill_switch" in names)
+    check(f"'{key}' team includes coordinator-level tools (e.g. get_self_knowledge)",
+          "get_self_knowledge" in names)
     owned = {n for n, t in ALL_TOOLS.items() if t.team == key}
     check(f"'{key}' team's tool_names() is exactly its owned tools + coordinator-level ones",
           names == owned | {n for n, t in ALL_TOOLS.items() if t.team is None})

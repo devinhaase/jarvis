@@ -47,9 +47,12 @@ self.addEventListener("push", (event) => {
   );
 });
 
-// Tap-to-deep-link: focus an already-open Jarvis tab and hand it the conversation id (or
-// dashboard target) via postMessage if one exists, otherwise open a fresh tab straight into
-// it via URL query params (app.js reads them on load — see boot() and _handleDeepLinkOnLoad).
+// Tap-to-deep-link: focus an already-open tab of the *right* page and hand it the target
+// via postMessage if one exists, otherwise open a fresh tab straight into it via URL query
+// params. A dashboard target now means dashboard.html (its own page since it moved out of
+// index.html — see task.md's entry), not the main chat page, so this matches clients by
+// pathname rather than just grabbing whatever Jarvis tab happens to be open — postMessaging
+// "open_dashboard_team" to a chat tab that isn't listening for it would silently do nothing.
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const conversationId = event.notification.data && event.notification.data.conversation_id;
@@ -57,16 +60,16 @@ self.addEventListener("notificationclick", (event) => {
   event.waitUntil(
     (async () => {
       const clientsList = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-      for (const client of clientsList) {
-        if ("focus" in client) {
-          await client.focus();
-          if (dashboard) client.postMessage({ type: "open_dashboard", team: dashboard.team, approval_id: dashboard.approval_id });
-          else if (conversationId) client.postMessage({ type: "open_conversation", conversation_id: conversationId });
-          return;
-        }
+      const wantPath = dashboard ? "/dashboard" : "/";
+      const match = clientsList.find((c) => { try { return new URL(c.url).pathname === wantPath; } catch (e) { return false; } });
+      if (match && "focus" in match) {
+        await match.focus();
+        if (dashboard) match.postMessage({ type: "open_dashboard_team", team: dashboard.team, approval_id: dashboard.approval_id });
+        else if (conversationId) match.postMessage({ type: "open_conversation", conversation_id: conversationId });
+        return;
       }
       let url = "/";
-      if (dashboard && dashboard.team) url = `/?team=${encodeURIComponent(dashboard.team)}`;
+      if (dashboard && dashboard.team) url = `/dashboard?team=${encodeURIComponent(dashboard.team)}`;
       else if (conversationId) url = `/?conv=${encodeURIComponent(conversationId)}`;
       if (self.clients.openWindow) await self.clients.openWindow(url);
     })()

@@ -1,0 +1,20 @@
+# Caddyfile — reverse proxy + automatic HTTPS for ai.dhaaselab.com, fronting the real
+# Jarvis server (server.py) at http://localhost:8765.
+#
+# Uses a DNS-01 ACME challenge via Cloudflare (see caddy/README.md) rather than the usual
+# HTTP-01 challenge — deliberate, because ai.dhaaselab.com's DNS record points at this
+# machine's Tailscale IP (100.x.x.x), which isn't publicly reachable. DNS-01 only needs to
+# prove control of the domain via a temporary DNS TXT record, so it works even though the
+# machine itself is only reachable over the tailnet — the whole point of this setup (see
+# REMOTE_ACCESS.md): a real trusted certificate without exposing anything to the public
+# internet.
+#
+# CLOUDFLARE_API_TOKEN is read from the environment by start_caddy.ps1 (pulled from the
+# main project's .env, same as every other secret here) — never hardcoded in this file.
+
+ai.dhaaselab.com {
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+	}
+	reverse_proxy localhost:8765
+}

@@ -321,8 +321,8 @@ def clear_flag(name: str):
 def active_skills_for_team(team_key: str) -> list:
     """Active, non-flagged skills scoped to a team — flagged skills stay listed as active
     (flagging never disables) but are excluded from what gets suggested to the model going
-    forward until a human clears the flag, same "don't act on your own uncertain signal"
-    posture the kill switch's Tier-1-only carve-out already models elsewhere.
+    forward until a human clears the flag, the same "don't act on your own uncertain
+    signal" posture this project applies elsewhere.
 
     Phase 6 item 2: sorted by weight() descending — a skill proven across many successful
     runs surfaces first (and gets the "[proven]" label in as_prompt_blurb), a brand-new or

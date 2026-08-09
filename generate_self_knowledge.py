@@ -98,8 +98,6 @@ def _security_posture_section() -> str:
         return f"(self-audit unavailable: {e})"
 
     lines = [f"**Status: {audit['status']}**\n"]
-    ks = audit["kill_switch"]
-    lines.append(f"- Kill switch: {'ARMED — ' + str(ks.get('reason')) if ks['armed'] else 'not armed'}")
     for item in audit["ok"]:
         lines.append(f"- OK: {item}")
     for item in audit["findings"]:
@@ -158,10 +156,9 @@ conversation history, projects, and file uploads persisted to a local SQLite dat
 API keys configured).
 
 I operate under a tiered approval system for everything I do (Tier 1 read-only through
-Tier 4 explicit-confirmation-every-time), a security-specialist mode with its own
+Tier 4 explicit-confirmation-every-time), and a security-specialist mode with its own
 offense/defense/practice taxonomy and a hard authorization allowlist for anything that
-touches a network target that isn't Devin's own machine, and — as of Phase 8 — a file-based
-kill switch that immediately halts every Tier 2+ action from any connected device.
+touches a network target that isn't Devin's own machine.
 
 ## Tool inventory
 
@@ -196,9 +193,6 @@ These are documented choices, not gaps someone forgot:
 - `generate_payload` only ever writes a file; it never executes, transfers, or deploys it.
 - `run_exploit_module` runs exactly one named module, one shot, no session chaining — a
   human decides what to do with any session it reports, not Jarvis.
-- The kill switch stops tool execution; it does not revoke device tokens or kill the server
-  process itself — pair it with a device revoke if the actual threat is a specific
-  compromised client.
 - `/upload`, `/transcribe`, and `/export/{{id}}` are unauthenticated HTTP endpoints by
   current design (only the WebSocket handshake enforces device tokens) — a real boundary
   worth closing if this server is ever exposed beyond a trusted LAN.

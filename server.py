@@ -758,18 +758,32 @@ async def websocket_endpoint(websocket: WebSocket):
     # Never trust what the client claims beyond what this device was registered for.
     capabilities = list(requested_caps & set(allowed_caps))
 
-    conversation_id = hello.get("conversation_id")
-    if not conversation_id or not store.conversation_exists(conversation_id):
-        conversation_id = store.create_conversation(device_id=device_id)
+    # dashboard.html connects over this same /ws protocol (reusing get_overseer_snapshot/
+    # get_team_dashboard/approve and every live broadcast — team_status_changed,
+    # approval_request/resolved, skill_updated, cross_team_incident — exactly as chat
+    # clients already do) but isn't a conversation participant. Without this flag it would
+    # silently create a fresh empty conversation on every single page load/reload — every
+    # other hello here always attaches to or creates one. `conversation_id` stays None for
+    # this connection; every downstream use of info["conversation_id"]/.get("conversation_id")
+    # already guards for falsy (see _detach) since a non-team-routed direct call already
+    # produces `None` team/conversation combinations elsewhere in this file.
+    dashboard_only = bool(hello.get("dashboard_only"))
+    if dashboard_only:
+        conversation_id = None
+    else:
+        conversation_id = hello.get("conversation_id")
+        if not conversation_id or not store.conversation_exists(conversation_id):
+            conversation_id = store.create_conversation(device_id=device_id)
 
     connected[websocket] = {"device_id": device_id, "capabilities": capabilities, "conversation_id": conversation_id}
-    watchers.setdefault(conversation_id, set()).add(websocket)
+    if conversation_id:
+        watchers.setdefault(conversation_id, set()).add(websocket)
 
     await websocket.send_json({
         "type": "ready", "conversation_id": conversation_id, "capabilities": capabilities,
         "brain_available": brain.is_available() if brain else False,
-        "resumed_turns": store.message_count(conversation_id),
-        "project_id": (store.get_conversation(conversation_id) or {}).get("project_id"),
+        "resumed_turns": store.message_count(conversation_id) if conversation_id else 0,
+        "project_id": (store.get_conversation(conversation_id) or {}).get("project_id") if conversation_id else None,
     })
 
     try:
@@ -921,6 +935,20 @@ async def websocket_endpoint(websocket: WebSocket):
             if mtype == "push_unsubscribe":
                 import push_notifications as _push
                 _push.unsubscribe(info["device_id"])
+                await websocket.send_json({"type": "push_settings", **_push.get_settings(info["device_id"])})
+                continue
+
+            # Tier 10 (android_app) — the FCM equivalent of push_subscribe above, same
+            # device-identity trust boundary (this socket's own hello-handshake device_id,
+            # never client-supplied). Sent by app.js's window.registerFcmToken(), which the
+            # Android app's own native code calls via evaluateJavascript() once it has a
+            # real token from the Firebase SDK — the WebView itself has no FCM API of its
+            # own to call this from JS directly, native code has to hand it in.
+            if mtype == "register_fcm_token":
+                import push_notifications as _push
+                token = msg.get("token")
+                if isinstance(token, str) and token:
+                    _push.register_fcm_token(info["device_id"], token)
                 await websocket.send_json({"type": "push_settings", **_push.get_settings(info["device_id"])})
                 continue
 
@@ -1225,6 +1253,22 @@ async def mind_page():
     return FileResponse(path)
 
 
+@app.get("/dashboard")
+async def dashboard_page():
+    """Serves webapp/dashboard.html directly (same clean-URL reasoning as /mind above).
+    The Overseer/team dashboard used to be an in-SPA tab inside index.html; Devin asked for
+    it as its own separate page/tab instead (so it can live on its own screen, and a new
+    chat doesn't open with the dashboard showing) — dashboard.html connects over the same
+    /ws protocol as index.html, just with hello's dashboard_only=True (see the /ws handler
+    below) so opening it doesn't create a phantom conversation."""
+    from fastapi.responses import FileResponse
+    path = os.path.join(WEBAPP_DIR, "dashboard.html")
+    if not os.path.exists(path):
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse("dashboard.html not found.", status_code=404)
+    return FileResponse(path)
+
+
 @app.get("/gui-config")
 async def gui_config():
     """Lets the served web page bootstrap its own device credentials on load — see
@@ -1248,6 +1292,29 @@ async def health():
         "status": "ok", "connected_devices": len(connected),
         "open_conversations": len(watchers),
         "brain_memory_facts": len(shared_memory.semantic_memory.get("facts", [])),
+    }
+
+
+# Part 3 (native-app update flow) — "minimum supported native-shell version." Only web/
+# dashboard changes are covered by both native shells automatically (they just load the
+# live web UI on every launch/reconnect, same as any browser tab would) — a change to the
+# shell itself (desktop_app/window.py, or android_app's Kotlin) needs a real rebuild and
+# redistribution, and there's no way for an already-installed app to know it's stale on its
+# own. Bump the relevant *_MIN_VERSION constant here as part of shipping a native-shell
+# change (not a web/dashboard-only one) — both apps compare their own built-in version
+# against this on every launch and show a small "update available" banner if behind. Two
+# independent values since the two shells version independently (desktop uses a plain
+# string it displays as-is; Android's versionCode is always an int, matching how Google
+# Play itself tracks version ordering).
+DESKTOP_MIN_VERSION = "1.0.0"
+ANDROID_MIN_VERSION_CODE = 1
+
+
+@app.get("/native-shell-version")
+async def native_shell_version():
+    return {
+        "desktop_min_version": DESKTOP_MIN_VERSION,
+        "android_min_version_code": ANDROID_MIN_VERSION_CODE,
     }
 
 
@@ -1337,11 +1404,29 @@ async def export_conversation(conversation_id: str):
     )
 
 
+class _NoCacheStaticFiles(StaticFiles):
+    """Plain StaticFiles sends no Cache-Control header at all, which leaves the browser free
+    to apply RFC 7234 heuristic caching (commonly ~10% of the Last-Modified age) and serve a
+    stale index.html/app.js/style.css straight from disk cache with no request to this server
+    at all — not even a conditional one. Real, live-hit bug found chasing down what looked
+    like a broken UI change: the file on disk was already correct, the browser just never
+    asked. `no-cache` (not `no-store`) keeps this cheap — ETag/Last-Modified conditional
+    revalidation still happens and still 304s when nothing changed — it just stops the browser
+    from skipping that check entirely. Worth the always-revalidate cost here: this is a
+    personal single-device server, not a CDN-fronted app serving thousands of clients, so
+    correctness after every restart/edit matters far more than shaving the conditional
+    request's round trip."""
+    def file_response(self, *args, **kwargs):
+        resp = super().file_response(*args, **kwargs)
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+
 # Mounted last, deliberately — a broad "/" static mount must not shadow the more specific
 # routes above (/ws, /health). Only mounts if webapp/ actually exists, so a server-only
 # checkout (no frontend built yet) still runs.
 if os.path.isdir(WEBAPP_DIR):
-    app.mount("/", StaticFiles(directory=WEBAPP_DIR, html=True), name="webapp")
+    app.mount("/", _NoCacheStaticFiles(directory=WEBAPP_DIR, html=True), name="webapp")
 
 
 # ---------------------------------------------------------------------------

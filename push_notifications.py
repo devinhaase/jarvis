@@ -34,6 +34,21 @@ Design, mirroring conventions already established elsewhere in this codebase:
   - A subscription pruned automatically on a 404/410 from the push service (the browser
     revoked it — Chrome does this on things like "clear browsing data") rather than left to
     fail forever and silently stop notifying.
+
+Part 2's Android app (Tier 10) added a second delivery platform, FCM, to the exact same
+store — a device_id entry now holds either a Web Push `subscription` (browser) or an FCM
+`fcm_token` (the Android app), never both, discriminated by which key is present.
+send_to_device()/send_to_all() dispatch to whichever the device actually has; every caller
+(server.py's approval/alert/briefing/message hooks) is unchanged — they never needed to know
+which platform a given device uses, and still don't.
+
+FCM sending needs a real Firebase project's service account credentials
+(data/firebase-service-account.json) — an account-level setup step that has to happen in
+the Firebase console, not something this code can create for you. Until that file exists,
+_send_fcm() degrades to a clear log line and `False`, the same "documented, not hidden"
+shape every other not-yet-configured integration in this project uses (google_auth.py's own
+missing-credentials.json path is the closest precedent). See android_app/README.md for the
+exact one-time steps.
 """
 
 import os
@@ -47,6 +62,10 @@ load_dotenv()
 VAPID_PRIVATE_KEY_FILE = os.path.join("data", ".vapid_private_key.pem")
 SUBSCRIPTIONS_FILE = os.path.join("data", "push_subscriptions.json")
 VAPID_CONTACT_EMAIL = os.getenv("JARVIS_VAPID_CONTACT_EMAIL", "mailto:devinhaase90@gmail.com")
+
+# Tier 10 (android_app) — see this module's docstring for the two-platform design.
+FCM_SERVICE_ACCOUNT_FILE = os.path.join("data", "firebase-service-account.json")
+FCM_SEND_URL_TEMPLATE = "https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
 
 CATEGORIES = ("approvals", "alerts", "briefing", "messages")
 DEFAULT_CATEGORIES = {"approvals": True, "alerts": True, "briefing": True, "messages": False}
@@ -130,6 +149,24 @@ def unsubscribe(device_id: str) -> bool:
     return False
 
 
+def register_fcm_token(device_id: str, fcm_token: str) -> dict:
+    """The FCM equivalent of subscribe() — same store, same category/quiet-hours prefs
+    survive re-registration (a token refresh, which FCM does periodically), the only
+    difference is what identifies the device to the push service: an `fcm_token` string
+    here instead of a Web Push `subscription` object. Whichever key is present is what
+    send_to_device() uses to decide which platform to actually send through."""
+    data = _load()
+    existing = data.get(device_id, {})
+    data[device_id] = {
+        "fcm_token": fcm_token,
+        "categories": existing.get("categories", dict(DEFAULT_CATEGORIES)),
+        "quiet_hours": existing.get("quiet_hours", dict(DEFAULT_QUIET_HOURS)),
+        "updated_at": time.time(),
+    }
+    _save(data)
+    return data[device_id]
+
+
 def get_settings(device_id: str) -> dict:
     entry = _load().get(device_id)
     if not entry:
@@ -203,11 +240,17 @@ def send_to_device(device_id: str, category: str, title: str, body: str,
     happen to be set. `dashboard` (Phase 7): optional {"team": ..., "approval_id": ...} —
     lets a tapped notification deep-link straight to a team dashboard or queue item, same
     idea as `conversation_id` but for the Overseer dashboard instead of a chat. Auto-prunes
-    the subscription on 404/410 (the browser revoked it)."""
+    the subscription on a platform-reported "this is gone" response (404/410 for Web Push,
+    UNREGISTERED for FCM) either way.
+
+    Dispatches to Web Push or FCM depending on which one this device_id actually has
+    registered (see the module docstring) — everything above this point (category/quiet-
+    hours gating, payload shape) is identical for both; only the actual delivery call
+    differs, isolated in _send_webpush()/_send_fcm() below."""
     assert category in CATEGORIES, f"unknown push category: {category!r}"
     data = _load()
     entry = data.get(device_id)
-    if not entry or not entry.get("subscription"):
+    if not entry or not (entry.get("subscription") or entry.get("fcm_token")):
         return False
     if not force and not entry.get("categories", DEFAULT_CATEGORIES).get(category, True):
         return False
@@ -218,6 +261,19 @@ def send_to_device(device_id: str, category: str, title: str, body: str,
         "title": title, "body": body[:200], "category": category,
         "tag": tag or category, "conversation_id": conversation_id, "dashboard": dashboard,
     }
+
+    if entry.get("fcm_token"):
+        sent = _send_fcm(entry["fcm_token"], payload, critical)
+    else:
+        sent = _send_webpush(entry["subscription"], payload, critical)
+
+    if sent is None:  # platform reported the registration is gone — sentinel, not True/False
+        unsubscribe(device_id)
+        return False
+    return sent
+
+
+def _send_webpush(subscription: dict, payload: dict, critical: bool):
     try:
         from pywebpush import webpush, WebPushException
         _vapid()  # ensures the key file exists before webpush() checks os.path.isfile() on it
@@ -231,7 +287,7 @@ def send_to_device(device_id: str, category: str, title: str, body: str,
         # the file *path*, not the key content, letting pywebpush's own correct code path
         # handle it instead of re-deriving the same key ourselves.
         webpush(
-            subscription_info=entry["subscription"],
+            subscription_info=subscription,
             data=json.dumps(payload),
             vapid_private_key=VAPID_PRIVATE_KEY_FILE,
             vapid_claims={"sub": VAPID_CONTACT_EMAIL},
@@ -241,10 +297,67 @@ def send_to_device(device_id: str, category: str, title: str, body: str,
     except Exception as e:
         code = getattr(getattr(e, "response", None), "status_code", None)
         if code in (404, 410):
-            unsubscribe(device_id)
-        else:
-            print(f"[push_notifications] send to {device_id!r} failed: {e}")
+            return None  # sentinel: send_to_device() unsubscribes on this, it's the one place that still has device_id
+        print(f"[push_notifications] webpush send failed: {e}")
         return False
+
+
+def _fcm_credentials():
+    """Returns (access_token, project_id), or (None, None) if the Firebase service account
+    hasn't been set up yet — see the module docstring and android_app/README.md. Deliberately
+    not cached across calls: access tokens expire in an hour, and this is at most one call
+    per notification, not a hot path worth the complexity of tracking token expiry."""
+    if not os.path.exists(FCM_SERVICE_ACCOUNT_FILE):
+        return None, None
+    from google.oauth2 import service_account
+    import google.auth.transport.requests
+    with open(FCM_SERVICE_ACCOUNT_FILE) as f:
+        project_id = json.load(f).get("project_id")
+    credentials = service_account.Credentials.from_service_account_file(
+        FCM_SERVICE_ACCOUNT_FILE, scopes=["https://www.googleapis.com/auth/firebase.messaging"],
+    )
+    credentials.refresh(google.auth.transport.requests.Request())
+    return credentials.token, project_id
+
+
+def _send_fcm(fcm_token: str, payload: dict, critical: bool):
+    access_token, project_id = _fcm_credentials()
+    if not access_token:
+        print("[push_notifications] FCM not configured yet (data/firebase-service-account.json missing) — see android_app/README.md")
+        return False
+
+    import requests
+    # Data-only message (no top-level "notification" block), matching the Web Push side's
+    # own shape exactly: the client (JarvisFirebaseMessagingService) builds the visible
+    # notification itself from these fields, the same way sw.js's own `push` handler does —
+    # one payload shape, one place that decides what a notification looks like, regardless
+    # of which platform delivered it. Data-only also guarantees onMessageReceived() actually
+    # fires even while backgrounded, which a "notification" block payload doesn't on some
+    # OEM Android skins (the OS handles display itself and may skip the app's own callback).
+    body = {
+        "message": {
+            "token": fcm_token,
+            "data": {k: (v if isinstance(v, str) else json.dumps(v)) for k, v in payload.items() if v is not None},
+            "android": {"priority": "high" if critical else "normal"},
+        }
+    }
+    try:
+        resp = requests.post(
+            FCM_SEND_URL_TEMPLATE.format(project_id=project_id),
+            json=body,
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10,
+        )
+    except requests.RequestException as e:
+        print(f"[push_notifications] FCM send failed: {e}")
+        return False
+
+    if resp.status_code == 200:
+        return True
+    if resp.status_code == 404 or "UNREGISTERED" in resp.text or "NOT_FOUND" in resp.text:
+        return None
+    print(f"[push_notifications] FCM send failed: {resp.status_code} {resp.text[:300]}")
+    return False
 
 
 def send_to_all(category: str, title: str, body: str, tag: str = None,

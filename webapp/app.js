@@ -5,25 +5,7 @@
 const $ = (sel) => document.querySelector(sel);
 
 const els = {
-  contentArea: $("#contentArea"),
-  dashboardTabBtn: $("#dashboardTabBtn"),
-  chatTabBtn: $("#chatTabBtn"),
   main: $("#main"),
-  dashboardView: $("#dashboardView"),
-  overseerView: $("#overseerView"),
-  teamDashboardView: $("#teamDashboardView"),
-  teamTiles: $("#teamTiles"),
-  overseerQueue: $("#overseerQueue"),
-  crossTeamLog: $("#crossTeamLog"),
-  systemHealthStrip: $("#systemHealthStrip"),
-  vpnStatusBadge: $("#vpnStatusBadge"),
-  backToOverseerBtn: $("#backToOverseerBtn"),
-  teamDashTitle: $("#teamDashTitle"),
-  teamDashStatus: $("#teamDashStatus"),
-  teamActivityFeed: $("#teamActivityFeed"),
-  teamQueue: $("#teamQueue"),
-  teamHistory: $("#teamHistory"),
-  teamHealthBlock: $("#teamHealthBlock"),
   sidebar: $("#sidebar"),
   sidebarToggle: $("#sidebarToggle"),
   sidebarOverlay: $("#sidebarOverlay"),
@@ -100,10 +82,9 @@ const state = {
   searchResults: [],
   pendingVoiceOrigin: false,  // composer text about to be sent came from dictation
   awaitingVoiceReply: false,  // speak the next assistant reply aloud
-  isRecording: false,
+  wakeArmed: false,   // mic is open, hands-free "hey Jarvis" listening loop is running
+  wakeBusy: false,    // wake loop pauses while true — set right before a wake-triggered sendMessage, cleared once the spoken reply finishes (see speakAloud)
   skills: [],
-  activeView: "dashboard",   // "dashboard" | "chat" — Phase 7, dashboard is the default landing view
-  dashboardTeam: null,       // team key currently drilled into, or null when on the Overseer view
 };
 
 // ---------------------------------------------------------------------------
@@ -178,7 +159,6 @@ function handleServerMessage(msg) {
       loadConversationMessages(state.conversationId);
       send({ type: "get_integration_status" });
       send({ type: "list_skills" });
-      send({ type: "get_overseer_snapshot" });
       break;
 
     case "conversation_list":
@@ -271,34 +251,10 @@ function handleServerMessage(msg) {
         state.skills = [msg.skill];
       }
       updateSkillsPendingBadge();
-      refreshCurrentDashboardView();  // Phase 7: a proposed/reviewed skill can change the queue
       break;
 
     case "integration_status":
       renderIntegrationStatus(msg);
-      break;
-
-    case "overseer_snapshot":
-      renderOverseerSnapshot(msg);
-      break;
-
-    case "team_dashboard":
-      renderTeamDashboard(msg);
-      break;
-
-    case "team_status_changed":
-      // Instant, in-place tile/pill update — no round trip needed for something this
-      // cheap, same reasoning as the integration dots' own live-toggle pattern.
-      patchTeamStatus(msg.team, msg.status, msg.detail);
-      break;
-
-    case "cross_team_incident":
-      // One team's output just triggered another's — refetch so the Overseer's log picks
-      // it up within a couple seconds, matching the live-update bar every other dashboard
-      // piece already holds itself to.
-      if (state.activeView === "dashboard" && !state.dashboardTeam) {
-        send({ type: "get_overseer_snapshot" });
-      }
       break;
 
     case "push_settings":
@@ -364,11 +320,6 @@ function handleServerMessage(msg) {
 
     case "approval_request":
       showApprovalBanner(msg);
-      refreshCurrentDashboardView();  // Phase 7: a new Tier-3/4 item just entered the queue
-      break;
-
-    case "approval_resolved":
-      refreshCurrentDashboardView();  // Phase 7: that item just left the queue
       break;
   }
 }
@@ -840,286 +791,6 @@ els.pushTestBtn.addEventListener("click", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Phase 7: Overseer + team dashboards. Dashboard is the default landing view (see
-// index.html — #dashboardTabBtn starts .active, #main starts .hidden); switching to Chat
-// leaves chat's own behavior completely untouched underneath. Within Dashboard, two
-// sub-views: Overseer (all 5 teams) and one team's drill-down, never both at once.
-// ---------------------------------------------------------------------------
-
-function showDashboardView() {
-  state.activeView = "dashboard";
-  els.main.classList.add("hidden");
-  els.dashboardView.classList.remove("hidden");
-  els.dashboardTabBtn.classList.add("active");
-  els.chatTabBtn.classList.remove("active");
-  refreshCurrentDashboardView();
-}
-
-function showChatView() {
-  state.activeView = "chat";
-  els.dashboardView.classList.add("hidden");
-  els.main.classList.remove("hidden");
-  els.chatTabBtn.classList.add("active");
-  els.dashboardTabBtn.classList.remove("active");
-}
-
-els.dashboardTabBtn.addEventListener("click", showDashboardView);
-els.chatTabBtn.addEventListener("click", showChatView);
-
-function showOverseer() {
-  state.dashboardTeam = null;
-  els.overseerView.classList.remove("hidden");
-  els.teamDashboardView.classList.add("hidden");
-  send({ type: "get_overseer_snapshot" });
-}
-
-function showTeamDashboard(teamKey) {
-  state.dashboardTeam = teamKey;
-  els.overseerView.classList.add("hidden");
-  els.teamDashboardView.classList.remove("hidden");
-  send({ type: "get_team_dashboard", team: teamKey });
-}
-
-els.backToOverseerBtn.addEventListener("click", showOverseer);
-
-// Re-fetches whichever dashboard sub-view is actually on screen — the single place every
-// live-update trigger (approval_request/resolved, skill_updated, cross_team_incident)
-// funnels through, so none of them need to know which sub-view is currently open.
-function refreshCurrentDashboardView() {
-  if (state.activeView !== "dashboard") return;
-  if (state.dashboardTeam) send({ type: "get_team_dashboard", team: state.dashboardTeam });
-  else send({ type: "get_overseer_snapshot" });
-}
-
-function renderOverseerSnapshot(snap) {
-  renderTeamTiles(snap.teams || []);
-  renderQueue(els.overseerQueue, snap.queue || [], true);
-  renderCrossTeamLog(snap.cross_team_log || []);
-  renderSystemHealth(snap.integration || {}, snap.vpn || {});
-}
-
-function renderTeamTiles(teams) {
-  els.teamTiles.innerHTML = "";
-  for (const t of teams) {
-    const tile = document.createElement("div");
-    tile.className = `team-tile status-${t.status}`;
-    tile.dataset.team = t.key;
-
-    const icon = document.createElement("div");
-    icon.className = "tile-icon";
-    icon.textContent = TEAM_ICON[t.key] || "🤖";
-    const name = document.createElement("div");
-    name.className = "tile-name";
-    name.textContent = t.name;
-    const status = document.createElement("div");
-    status.className = "tile-status";
-    status.textContent = t.status;
-
-    tile.appendChild(icon);
-    tile.appendChild(name);
-    tile.appendChild(status);
-    tile.addEventListener("click", () => showTeamDashboard(t.key));
-    els.teamTiles.appendChild(tile);
-  }
-}
-
-// Instant in-place update on a live team_status_changed broadcast — avoids a full
-// re-fetch for something this cheap, while refreshCurrentDashboardView() (triggered by
-// the less frequent events) stays the correctness backstop.
-function patchTeamStatus(teamKey, status, detail) {
-  const tile = els.teamTiles.querySelector(`.team-tile[data-team="${teamKey}"]`);
-  if (tile) {
-    tile.className = `team-tile status-${status}`;
-    const statusEl = tile.querySelector(".tile-status");
-    if (statusEl) statusEl.textContent = status;
-  }
-  if (state.dashboardTeam === teamKey) {
-    els.teamDashStatus.textContent = status;
-    els.teamDashStatus.className = "team-status-pill status-" + status;
-  }
-}
-
-function renderQueue(container, items, showTeamLabel) {
-  container.innerHTML = "";
-  if (!items || items.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "queue-empty";
-    empty.textContent = "Nothing waiting.";
-    container.appendChild(empty);
-    return;
-  }
-  // Tier 4 > Tier 3 > proposed skill, newest first within each — mirrors the server's own
-  // _overseer_snapshot() ordering; team-scoped queues (showTeamLabel=false) get the same
-  // treatment for consistency even though it's already pre-sorted server-side there too.
-  for (const item of items) {
-    const row = document.createElement("div");
-    row.className = "queue-item";
-
-    const badge = document.createElement("span");
-    if (item.kind === "approval") {
-      badge.className = "queue-badge " + (item.tier === "TIER_4" ? "tier-4" : "tier-3");
-      badge.textContent = item.tier === "TIER_4" ? "TIER 4" : "TIER 3";
-    } else {
-      badge.className = "queue-badge skill";
-      badge.textContent = "SKILL";
-    }
-    row.appendChild(badge);
-
-    const title = document.createElement("span");
-    title.className = "queue-title";
-    title.textContent = item.title;
-    row.appendChild(title);
-
-    if (showTeamLabel) {
-      const team = document.createElement("span");
-      team.className = "queue-team";
-      team.textContent = `${TEAM_ICON[item.team] || "🤖"} ${TEAM_LABEL[item.team] || item.team || "—"}`;
-      row.appendChild(team);
-    }
-
-    const actions = document.createElement("span");
-    actions.className = "queue-actions";
-    if (item.kind === "approval") {
-      const approve = document.createElement("button");
-      approve.className = "approve";
-      approve.textContent = "Approve";
-      approve.addEventListener("click", () => send({ type: "approve", approval_id: item.id, approved: true }));
-      const deny = document.createElement("button");
-      deny.className = "deny";
-      deny.textContent = "Deny";
-      deny.addEventListener("click", () => send({ type: "approve", approval_id: item.id, approved: false }));
-      actions.appendChild(approve);
-      actions.appendChild(deny);
-    } else {
-      const review = document.createElement("button");
-      review.className = "approve";
-      review.textContent = "Review";
-      review.addEventListener("click", () => {
-        send({ type: "list_skills" });
-        els.skillsModal.classList.remove("hidden");
-      });
-      actions.appendChild(review);
-    }
-    row.appendChild(actions);
-    container.appendChild(row);
-  }
-}
-
-function renderCrossTeamLog(incidents) {
-  els.crossTeamLog.innerHTML = "";
-  if (!incidents || incidents.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "log-empty";
-    empty.textContent = "No cross-team activity yet.";
-    els.crossTeamLog.appendChild(empty);
-    return;
-  }
-  for (const inc of incidents) {
-    const row = document.createElement("div");
-    row.className = "log-entry";
-    const link = document.createElement("div");
-    link.className = "log-link";
-    link.textContent = `${TEAM_ICON[inc.created_by_team] || "🤖"} ${TEAM_LABEL[inc.created_by_team] || inc.created_by_team || "?"} `
-      + `→ ${TEAM_ICON[inc.target_team] || "🤖"} ${TEAM_LABEL[inc.target_team] || inc.target_team}`;
-    const title = document.createElement("div");
-    title.className = "log-title";
-    title.textContent = `${inc.title} (${inc.status})`;
-    row.appendChild(link);
-    row.appendChild(title);
-    els.crossTeamLog.appendChild(row);
-  }
-}
-
-function renderSystemHealth(integration, vpn) {
-  els.systemHealthStrip.innerHTML = "";
-  const items = [
-    ["Obsidian", integration.obsidian], ["Gmail", integration.gmail],
-    ["Calendar", integration.calendar], ["Drive", integration.drive],
-  ];
-  for (const [label, ok] of items) {
-    const chip = document.createElement("span");
-    chip.className = "health-chip " + (ok ? "ok" : "warn");
-    chip.textContent = `${ok ? "●" : "○"} ${label}`;
-    els.systemHealthStrip.appendChild(chip);
-  }
-  if (vpn && vpn.detected) {
-    els.vpnStatusBadge.textContent = vpn.running ? `🔒 Tailscale connected${vpn.hostname ? " (" + vpn.hostname + ")" : ""}` : "🔒 Tailscale installed, not running";
-    els.vpnStatusBadge.className = "vpn-status-badge" + (vpn.running ? " ok" : "");
-  } else {
-    els.vpnStatusBadge.className = "vpn-status-badge hidden";
-  }
-}
-
-function renderTeamDashboard(dash) {
-  if (dash.error) return;
-  els.teamDashTitle.textContent = `${TEAM_ICON[dash.key] || "🤖"} ${dash.name}`;
-  els.teamDashStatus.textContent = dash.status;
-  els.teamDashStatus.className = "team-status-pill status-" + dash.status;
-
-  els.teamActivityFeed.innerHTML = "";
-  if (dash.status === "idle") {
-    const empty = document.createElement("div");
-    empty.className = "feed-empty";
-    empty.textContent = "Idle — nothing running right now.";
-    els.teamActivityFeed.appendChild(empty);
-  } else {
-    const entry = document.createElement("div");
-    entry.className = "feed-entry";
-    const time = document.createElement("span");
-    time.className = "feed-time";
-    time.textContent = relTime(dash.since);
-    entry.appendChild(time);
-    entry.appendChild(document.createTextNode(dash.detail || dash.status));
-    els.teamActivityFeed.appendChild(entry);
-  }
-
-  const combinedQueue = [
-    ...(dash.queue || []).map(q => ({ ...q, kind: "approval" })),
-    ...(dash.proposed_skills || []).map(s => ({ kind: "skill", id: s.name, title: s.name, team: s.team, tier: s.tier })),
-  ];
-  renderQueue(els.teamQueue, combinedQueue, false);
-
-  els.teamHistory.innerHTML = "";
-  if (!dash.history || dash.history.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "history-empty";
-    empty.textContent = "No recorded actions yet.";
-    els.teamHistory.appendChild(empty);
-  } else {
-    for (const ep of dash.history) {
-      const row = document.createElement("div");
-      row.className = "history-entry outcome-" + (ep.outcome || "success");
-      const dot = document.createElement("span");
-      dot.className = "outcome-dot";
-      const action = document.createElement("span");
-      action.className = "history-action";
-      action.textContent = ep.action;
-      const time = document.createElement("span");
-      time.className = "history-time";
-      time.textContent = relTime(ep.timestamp);
-      row.appendChild(dot);
-      row.appendChild(action);
-      row.appendChild(time);
-      els.teamHistory.appendChild(row);
-    }
-  }
-
-  renderTeamHealthBlock(dash.key, dash.health || {}, dash.incidents || []);
-}
-
-function renderTeamHealthBlock(teamKey, health, incidents) {
-  const parts = [];
-  if (teamKey === "hacking") {
-    const total = (health.authorized_hosts || []).length + (health.authorized_domains || []).length + (health.authorized_networks || []).length;
-    parts.push(`${total} authorized target(s)`);
-  } else if (teamKey === "cybersecurity") {
-    parts.push(`${health.open_alerts || 0} open alert(s)`);
-  }
-  if (incidents.length) parts.push(`${incidents.length} open incident(s) targeting this team`);
-  els.teamHealthBlock.textContent = parts.length ? parts.join(" · ") : "No dedicated health checks for this team yet.";
-}
-
-// ---------------------------------------------------------------------------
 // Skill review queue (Phase 5) — proposed skills need Devin's explicit approve/edit/
 // reject before they're eligible to run; this panel is the only client-facing path to
 // those actions, mirroring the server's own "only a connected device can trigger this"
@@ -1552,78 +1223,190 @@ function showApprovalBanner(msg) {
 }
 
 // ---------------------------------------------------------------------------
-// Voice input — Web Audio API capture (local mic, resampled to raw PCM16/16kHz in the
-// browser), posted to /transcribe, which reuses the same local Vosk engine the wake-word
-// companion uses. Nothing here is cloud STT — no Web Speech API, deliberately, so this
-// stays consistent with the rest of this app's zero-API-key voice story. TTS playback of
-// the reply uses the browser's own built-in speechSynthesis — also fully local, nothing
-// sent anywhere, just the system voice reading text out loud.
+// Voice input — hands-free wake word ("hey Jarvis"), Web Audio API capture (local mic,
+// resampled to raw PCM16/16kHz in the browser), posted to /transcribe, which reuses the
+// same local Vosk engine voice_companion.py's wake-word listener uses. Nothing here is
+// cloud STT — no Web Speech API, deliberately, so this stays consistent with the rest of
+// this app's zero-API-key voice story. TTS playback of the reply uses the browser's own
+// built-in speechSynthesis — also fully local, nothing sent anywhere, just the system
+// voice reading text out loud.
+//
+// Click the mic once to arm: it opens the mic and keeps it open, alternating between two
+// phases, until you click it again to disarm:
+//   1. Listening for the wake word — ~2.5s rolling windows, each transcribed and checked
+//      for "jarvis" appearing anywhere in it.
+//   2. Heard it — capture the actual command, auto-stopping on ~1.1s of trailing silence
+//      (or a 12s hard cap), then send it exactly like a normal typed message and speak the
+//      reply back (same awaitingVoiceReply mechanism a typed message never touches).
+//
+// Real, deliberate limitation (documented, not hidden — same honesty as redact()/the
+// prompt-injection detector elsewhere in this project): this is disjoint-window "does the
+// word appear in this transcript" wake detection, not a real streaming wake-word model like
+// voice.py's openWakeWord. A phrase spoken right at a window boundary can get split across
+// two windows and missed in both — carrying a short audio tail into the next window (below)
+// softens that but doesn't eliminate it. voice_companion.py's real wake-word engine remains
+// the more reliable choice for "always want to be heard"; this is the browser-tab
+// equivalent, with the trade-offs a browser tab actually has (a live mic stays open the
+// whole time the tab is armed — that's the cost of hands-free here, not a bug).
 // ---------------------------------------------------------------------------
 
-let audioCtx = null;
-let micStream = null;
-let micSource = null;
-let micProcessor = null;
-let micSilentGain = null;
-let recordedChunks = [];
-let recordingSampleRate = 16000;
+let wakeAudioCtx = null;
+let wakeMicStream = null;
+let wakeMicSource = null;
+let wakeMicProcessor = null;
+let wakeSilentGain = null;
 
-async function startRecording() {
+const WAKE_WORD_WINDOW_MS = 2500;
+const WAKE_TAIL_CARRY_MS = 600;     // audio carried from the end of one window into the next, so a phrase spoken right at the boundary isn't split and lost in both halves
+const COMMAND_SILENCE_MS = 1100;    // trailing quiet required after real speech before a command is considered finished
+const COMMAND_MAX_MS = 12000;       // hard cap regardless of silence, so a stuck/noisy mic can't listen forever
+const VOICE_RMS_THRESHOLD = 0.02;   // rough "someone is actually talking" floor for the silence detector
+
+async function armWakeWord() {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     appendToolNote("This browser doesn't support microphone capture.");
     return;
   }
   try {
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    wakeMicStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
   } catch (e) {
     appendToolNote("Microphone access was denied or is unavailable.");
     return;
   }
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  recordingSampleRate = audioCtx.sampleRate;
-  micSource = audioCtx.createMediaStreamSource(micStream);
-  micProcessor = audioCtx.createScriptProcessor(4096, 1, 1);
-  recordedChunks = [];
-
-  micProcessor.onaudioprocess = (e) => {
-    recordedChunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
-  };
+  wakeAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  wakeMicSource = wakeAudioCtx.createMediaStreamSource(wakeMicStream);
+  wakeMicProcessor = wakeAudioCtx.createScriptProcessor(4096, 1, 1);
 
   // ScriptProcessorNode only fires onaudioprocess while connected through to the
   // destination in some browsers — route through a silent gain so nothing is actually
   // heard (no mic-to-speaker feedback) while still satisfying that requirement.
-  micSilentGain = audioCtx.createGain();
-  micSilentGain.gain.value = 0;
-  micSource.connect(micProcessor);
-  micProcessor.connect(micSilentGain);
-  micSilentGain.connect(audioCtx.destination);
+  wakeSilentGain = wakeAudioCtx.createGain();
+  wakeSilentGain.gain.value = 0;
+  wakeMicSource.connect(wakeMicProcessor);
+  wakeMicProcessor.connect(wakeSilentGain);
+  wakeSilentGain.connect(wakeAudioCtx.destination);
 
-  state.isRecording = true;
-  els.micBtn.classList.add("recording");
+  state.wakeArmed = true;
+  els.micBtn.classList.add("wake-armed");
+  els.micBtn.title = 'Listening for "hey Jarvis" — click to stop';
   send({ type: "voice_status", state: "listening" });
+  _wakeLoop();
 }
 
-function stopRecording() {
-  if (!state.isRecording) return;
-  state.isRecording = false;
-  els.micBtn.classList.remove("recording");
+function disarmWakeWord() {
+  if (!state.wakeArmed) return;
+  state.wakeArmed = false;
+  els.micBtn.classList.remove("wake-armed", "wake-capturing");
+  els.micBtn.title = "Voice input";
   send({ type: "voice_status", state: "idle" });
 
-  try { micProcessor.disconnect(); } catch (e) {}
-  try { micSilentGain.disconnect(); } catch (e) {}
-  try { micSource.disconnect(); } catch (e) {}
-  if (micStream) micStream.getTracks().forEach(t => t.stop());
-  const sourceRate = recordingSampleRate;
-  const chunks = recordedChunks;
-  recordedChunks = [];
-  if (audioCtx) audioCtx.close();
-
-  if (!chunks.length) return;
-  const merged = mergeFloat32(chunks);
-  const resampled = downsampleTo16k(merged, sourceRate);
-  const pcm16 = floatTo16BitPCM(resampled);
-  transcribeAndFill(pcm16);
+  try { wakeMicProcessor.disconnect(); } catch (e) {}
+  try { wakeSilentGain.disconnect(); } catch (e) {}
+  try { wakeMicSource.disconnect(); } catch (e) {}
+  if (wakeMicStream) wakeMicStream.getTracks().forEach(t => t.stop());
+  if (wakeAudioCtx) wakeAudioCtx.close();
+  wakeAudioCtx = null; wakeMicStream = null; wakeMicSource = null; wakeMicProcessor = null; wakeSilentGain = null;
 }
+
+function _sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+function _rms(buf) {
+  let sum = 0;
+  for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+  return Math.sqrt(sum / buf.length);
+}
+
+// Records from the already-open wake mic session, calling `shouldStop(chunk, elapsedMs)`
+// after every ~4096-sample callback, until it returns true (or the mic gets disarmed out
+// from under it). `prefixChunks` (optional) is prepended before the first real chunk —
+// used to carry the wake-word window's audio tail into the next window.
+function _recordUntil(shouldStop, prefixChunks) {
+  return new Promise((resolve) => {
+    const chunks = prefixChunks ? [...prefixChunks] : [];
+    const startedAt = performance.now();
+    wakeMicProcessor.onaudioprocess = (e) => {
+      if (!state.wakeArmed) { wakeMicProcessor.onaudioprocess = null; resolve({ chunks: null, tail: null }); return; }
+      const data = new Float32Array(e.inputBuffer.getChannelData(0));
+      chunks.push(data);
+      if (shouldStop(data, performance.now() - startedAt)) {
+        wakeMicProcessor.onaudioprocess = null;
+        resolve({ chunks, tail: data });
+      }
+    };
+  });
+}
+
+async function _transcribeChunks(chunks) {
+  if (!chunks || !chunks.length) return "";
+  const pcm16 = floatTo16BitPCM(downsampleTo16k(mergeFloat32(chunks), wakeAudioCtx.sampleRate));
+  const blob = new Blob([pcm16], { type: "application/octet-stream" });
+  const formData = new FormData();
+  formData.append("audio", blob, "clip.raw");
+  try {
+    const resp = await fetch("/transcribe", { method: "POST", body: formData });
+    const data = await resp.json();
+    return data.text || "";
+  } catch (e) {
+    return "";
+  }
+}
+
+async function _wakeLoop() {
+  let carryTail = null;
+  while (state.wakeArmed) {
+    // Don't listen while Jarvis is speaking the last reply — see speakAloud for the normal
+    // release path. Capped at 30s so a dropped connection/missed stream_end (speakAloud
+    // never gets called at all in that case) can't wedge the wake loop shut forever;
+    // disarming/rearming already resets it too, this just means you don't have to.
+    let waited = 0;
+    while (state.wakeArmed && state.wakeBusy && waited < 30000) { await _sleep(150); waited += 150; }
+    state.wakeBusy = false;
+    if (!state.wakeArmed) break;
+
+    // Phase 1: poll for the wake word.
+    els.micBtn.classList.remove("wake-capturing");
+    const { chunks, tail } = await _recordUntil((_, elapsed) => elapsed > WAKE_WORD_WINDOW_MS, carryTail);
+    carryTail = tail ? [tail] : null;  // only ever carry the single most recent callback's worth (~85ms @ 48kHz/4096) is too little on its own, so keep accumulating below
+    if (!state.wakeArmed || !chunks) break;
+    const heard = await _transcribeChunks(chunks);
+    if (!state.wakeArmed) break;
+    if (!heard || !heard.toLowerCase().includes("jarvis")) continue;
+
+    // Phase 2: wake word heard — capture the actual command, auto-stopping on trailing
+    // silence (same "notify, then act" reasoning this project already applies to Tier-3
+    // tool approvals — give it a moment, don't demand an explicit end signal).
+    els.micBtn.classList.add("wake-capturing");
+    appendToolNote('🎙️ Heard "Jarvis" — listening…', "team-note");
+    let spoke = false;
+    let silenceSince = null;
+    const captured = await _recordUntil((chunk, elapsed) => {
+      const level = _rms(chunk);
+      if (level > VOICE_RMS_THRESHOLD) { spoke = true; silenceSince = null; }
+      else if (spoke && silenceSince === null) { silenceSince = performance.now(); }
+      const quietFor = silenceSince !== null ? performance.now() - silenceSince : 0;
+      return elapsed > COMMAND_MAX_MS || (spoke && quietFor > COMMAND_SILENCE_MS);
+    });
+    els.micBtn.classList.remove("wake-capturing");
+    if (!state.wakeArmed || !captured.chunks) break;
+    const text = await _transcribeChunks(captured.chunks);
+    if (!state.wakeArmed) break;
+    if (text && text.trim()) {
+      state.pendingVoiceOrigin = true;
+      state.wakeBusy = true;  // hold off the next listening window until the reply's been spoken (see speakAloud)
+      sendMessage(text);
+    } else {
+      appendToolNote("(didn't catch a command after the wake word)");
+    }
+    carryTail = null;  // a command capture just ran long past any short-window carry being meaningful
+  }
+}
+
+els.micBtn.addEventListener("click", () => {
+  if (state.wakeArmed) disarmWakeWord();
+  else armWakeWord();
+});
 
 function mergeFloat32(chunks) {
   let length = 0;
@@ -1666,43 +1449,24 @@ function floatTo16BitPCM(float32Array) {
   return buffer;
 }
 
-async function transcribeAndFill(pcm16Buffer) {
-  const blob = new Blob([pcm16Buffer], { type: "application/octet-stream" });
-  const formData = new FormData();
-  formData.append("audio", blob, "clip.raw");
-  els.micBtn.title = "Transcribing…";
-  try {
-    const resp = await fetch("/transcribe", { method: "POST", body: formData });
-    const data = await resp.json();
-    if (data.text) {
-      const existing = els.composerInput.value;
-      els.composerInput.value = existing ? existing + " " + data.text : data.text;
-      els.composerInput.style.height = "auto";
-      els.composerInput.style.height = Math.min(els.composerInput.scrollHeight, 160) + "px";
-      state.pendingVoiceOrigin = true;
-      els.composerInput.focus();
-    } else {
-      appendToolNote("(didn't catch that)");
-    }
-  } catch (e) {
-    appendToolNote(`Transcription failed: ${e}`);
-  }
-  els.micBtn.title = "Voice input";
-}
-
+// `wakeBusy` (set by _wakeLoop right before sendMessage on a wake-triggered command) is
+// cleared here, on the utterance actually finishing — not on a fixed timer — so the next
+// wake-word listening window doesn't open while Jarvis's own reply is still playing out of
+// the speakers and at real risk of the mic hearing itself (echoCancellation on the mic
+// stream helps too, but this closes the gap between "reply text arrived" and "TTS actually
+// started/finished speaking it", which a fixed delay can't know either side of).
 function speakAloud(text) {
-  if (!text || !("speechSynthesis" in window)) return;
+  if (!text || !("speechSynthesis" in window)) { state.wakeBusy = false; return; }
   try {
     window.speechSynthesis.cancel();  // don't stack replies if one's already speaking
     const utter = new SpeechSynthesisUtterance(text);
+    utter.onend = () => { state.wakeBusy = false; };
+    utter.onerror = () => { state.wakeBusy = false; };
     window.speechSynthesis.speak(utter);
-  } catch (e) { /* best-effort — silence isn't worth surfacing an error for */ }
+  } catch (e) {
+    state.wakeBusy = false;  // best-effort — silence isn't worth surfacing an error for, but the wake loop still needs releasing
+  }
 }
-
-els.micBtn.addEventListener("click", () => {
-  if (state.isRecording) stopRecording();
-  else startRecording();
-});
 
 // ---------------------------------------------------------------------------
 // Mobile sidebar toggle
@@ -1786,19 +1550,8 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.addEventListener("message", (event) => {
     if (event.data && event.data.type === "open_conversation" && event.data.conversation_id) {
       openConversation(event.data.conversation_id);
-    } else if (event.data && event.data.type === "open_dashboard" && event.data.team) {
-      openDashboardTeam(event.data.team);
     }
   });
-}
-
-// Phase 7: shared by the postMessage handler above and the ?team= deep link below —
-// switches to the Dashboard tab and drills straight into one team, same "tapping a phone
-// alert lands you on the exact queue item" requirement item 6's conversation deep link
-// already satisfies, just for a team dashboard instead of a chat.
-function openDashboardTeam(teamKey) {
-  showDashboardView();
-  showTeamDashboard(teamKey);
 }
 
 function notifyIfHidden(title, body) {
@@ -1850,23 +1603,40 @@ async function disablePushNotifications() {
   }
 }
 
+// Tier 10 (android_app) — called from native Android code via
+// webView.evaluateJavascript("window.registerFcmToken('...')"), never by this page's own
+// JS. The WebView has no FCM API of its own to get a token from directly (that's the
+// Firebase SDK, native-only) — the app fetches the token itself and hands it in here, the
+// one deliberate seam between the native shell and the web UI it hosts. Exposed on
+// `window` (not just a local function) specifically so evaluateJavascript can reach it.
+// Retries until the socket is actually open rather than dropping the call — the native
+// side may well call this before boot()'s own hello handshake has finished.
+window.registerFcmToken = function (token) {
+  const trySend = () => {
+    if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+      send({ type: "register_fcm_token", token });
+    } else {
+      setTimeout(trySend, 300);
+    }
+  };
+  trySend();
+};
+
 // ---------------------------------------------------------------------------
 boot();
 
 // Deep link: a notification tap that had to open a fresh tab/window (sw.js's
-// notificationclick openWindow fallback) lands here with ?conv=<id> or ?team=<key> — open
-// it once we're actually connected (state.conversationId gets set by the "ready" handler
-// first; a team dashboard has no such prerequisite but waits on the same open socket so
-// get_team_dashboard has something to send to).
+// notificationclick openWindow fallback) lands here with ?conv=<id> — open it once we're
+// actually connected (state.conversationId gets set by the "ready" handler first). A
+// dashboard/team deep link now opens /dashboard directly (see sw.js) rather than landing
+// here, since the dashboard moved out of this page entirely.
 (function _handleDeepLinkOnLoad() {
   const params = new URLSearchParams(window.location.search);
   const conv = params.get("conv");
-  const team = params.get("team");
-  if (!conv && !team) return;
+  if (!conv) return;
   const tryOpen = () => {
     if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-      if (team) openDashboardTeam(team);
-      else openConversation(conv);
+      openConversation(conv);
     } else {
       setTimeout(tryOpen, 300);
     }

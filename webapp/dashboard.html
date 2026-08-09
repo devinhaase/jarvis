@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jarvis — Dashboard</title>
+<!-- Shares style.css for design tokens (:root theme vars) and every component this page
+     reuses as-is (modal-overlay/modal, tool-entry/tool-group-title/tool-desc, text-btn,
+     icon-btn) — dashboard.css only adds what's actually unique to this page. See
+     dashboard.css's own header comment. -->
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/dashboard.css">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#0a84ff">
+</head>
+<body>
+<div id="dashPage">
+
+  <header id="dashTopBar">
+    <a id="backLink" href="/" title="Back to chat">&larr;</a>
+    <span class="brand">JARVIS <span class="dim">— Dashboard</span></span>
+    <span id="connStatus" class="conn-status offline">connecting…</span>
+  </header>
+
+  <main id="dashMain">
+    <div id="overseerView">
+      <header class="dashboard-header">
+        <h1>Overseer</h1>
+        <span id="vpnStatusBadge" class="vpn-status-badge hidden"></span>
+      </header>
+
+      <div id="teamTiles" class="team-tiles"></div>
+
+      <div class="dashboard-section">
+        <h2>Needs your attention</h2>
+        <div id="overseerQueue" class="queue-list"></div>
+      </div>
+
+      <div class="dashboard-section">
+        <h2>Cross-team activity</h2>
+        <div id="crossTeamLog" class="cross-team-log"></div>
+      </div>
+
+      <div class="dashboard-section">
+        <h2>System health</h2>
+        <div id="systemHealthStrip" class="system-health-strip"></div>
+      </div>
+    </div>
+
+    <div id="teamDashboardView" class="hidden">
+      <button id="backToOverseerBtn" class="text-btn">← Overseer</button>
+      <header class="dashboard-header">
+        <h1 id="teamDashTitle"></h1>
+        <span id="teamDashStatus" class="team-status-pill"></span>
+      </header>
+
+      <div class="dashboard-section">
+        <h2>Live activity</h2>
+        <div id="teamActivityFeed" class="activity-feed"></div>
+      </div>
+
+      <div class="dashboard-section">
+        <h2>Waiting on you</h2>
+        <div id="teamQueue" class="queue-list"></div>
+      </div>
+
+      <div class="dashboard-section">
+        <h2>Recent task history</h2>
+        <div id="teamHistory" class="task-history"></div>
+      </div>
+
+      <div class="dashboard-section">
+        <h2>Team health</h2>
+        <div id="teamHealthBlock" class="team-health-block"></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Skill review queue — reachable via a queue item's "Review" button, same modal
+       index.html's sidebar Skills button opens, ported here so Review works standalone
+       without needing the chat page open in another tab. -->
+  <div id="skillsModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <span>Skill Review Queue</span>
+        <button id="skillsCloseBtn" class="icon-btn">✕</button>
+      </div>
+      <div id="skillsBody" class="modal-body"></div>
+    </div>
+  </div>
+
+</div>
+<script src="/dashboard.js"></script>
+</body>
+</html>

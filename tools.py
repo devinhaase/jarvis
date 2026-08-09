@@ -23,8 +23,8 @@ class Tool:
         # (Phase 4 team taxonomy — orthogonal to `role`: role is a security posture tag,
         # team is which functional group owns this capability). None means coordinator-level
         # — always reachable regardless of which team is routed to, currently just the
-        # kill switch and self-knowledge tools (see teams.py's module docstring for why
-        # those specifically stay outside any one team's scope).
+        # self-knowledge tool (see teams.py's module docstring for why it specifically
+        # stays outside any one team's scope).
         self.team = team
 
     def execute(self, *args, **kwargs):
@@ -201,30 +201,15 @@ except Exception:
     pass  # File tools unavailable — Jarvis continues without them
 
 try:
-    from security_hardening import arm_kill_switch, disarm_kill_switch, kill_switch_status, run_self_audit
+    from security_hardening import run_self_audit
 
-    # Kill switch stays coordinator-level (team=None), deliberately not owned by
-    # Cybersecurity: an emergency stop needs to be reachable no matter which team (or no
-    # team) is currently handling a request — see _check_kill_switch in coordinator.py,
-    # which already exempts disarm from its own block for the same "must stay reachable"
-    # reasoning.
-    ops_tools["arm_kill_switch"] = Tool(
-        "arm_kill_switch",
-        "EMERGENCY STOP: immediately refuse every Tier 2+ tool call until disarmed. Takes an "
-        "optional 'reason'. Always Tier 1 itself — stopping must never be blocked by anything.",
-        Tier.TIER_1, arm_kill_switch,
-    )
-    ops_tools["disarm_kill_switch"] = Tool(
-        "disarm_kill_switch", "Turn the kill switch back off, resuming normal tool execution.",
-        Tier.TIER_2, disarm_kill_switch,
-    )
-    ops_tools["kill_switch_status"] = Tool(
-        "kill_switch_status", "Check whether the kill switch is currently armed and why.",
-        Tier.TIER_1, kill_switch_status,
-    )
+    # run_self_audit stays owned by Cybersecurity (it's their posture-check tool).
+    # (This block used to also register a file-flag "kill switch" emergency stop;
+    # removed at Devin's explicit request — see security_hardening.py's module
+    # docstring and task.md's entry for the removal.)
     ops_tools["run_self_audit"] = Tool(
         "run_self_audit",
-        "Read-only audit of Jarvis's own security hardening: kill switch state, whether "
+        "Read-only audit of Jarvis's own security hardening: whether "
         "credential files are accidentally tracked in git, registered device count/staleness.",
         Tier.TIER_1, run_self_audit, role="defense", team="cybersecurity",
     )

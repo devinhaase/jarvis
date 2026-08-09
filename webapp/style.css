@@ -210,37 +210,24 @@ html, body {
   margin-right: 5px;
 }
 
-/* ---------- Phase 7: content area wrapper (tabs + Chat/Dashboard) ---------- */
-/* #main used to be the direct flex child of #app; it now sits inside #contentArea
-   alongside #dashboardView, with #contentArea taking over that flex role. */
+/* #main sits inside #contentArea, a thin flex wrapper — kept as its own layer (rather than
+   folding #main's rules directly onto #app's child) so a future second view inside chat's
+   own area doesn't need another restructure. The Overseer/team dashboard used to live in
+   here too as a second tab (#dashboardView); it's now its own standalone page
+   (dashboard.html, opened via the sidebar's Dashboard button) — see task.md's entry on why
+   (a new chat should always open straight to chat, and the dashboard can live on its own
+   screen). */
 
 #contentArea {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0; /* flex items default to min-height:auto, which lets a column child grow
+                    past its container instead of shrinking — without this, a long chat
+                    pushes #main taller than the viewport instead of letting .messages
+                    below actually scroll. Same reasoning applies to #main below. */
 }
-
-.view-tabs {
-  display: flex;
-  gap: 4px;
-  padding: 8px 12px 0 12px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.view-tab {
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  font-size: 13px;
-  font-weight: 600;
-  padding: 8px 14px;
-  cursor: pointer;
-  border-radius: 8px 8px 0 0;
-  border-bottom: 2px solid transparent;
-}
-.view-tab:hover { background: var(--hover); }
-.view-tab.active { color: var(--accent); border-bottom: 2px solid var(--accent); }
 
 /* ---------- Main / chat ---------- */
 
@@ -249,8 +236,8 @@ html, body {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0; /* see #contentArea's comment above — same fix, one level down */
 }
-#main.hidden { display: none; }
 
 #chatHeader {
   display: flex;
@@ -472,6 +459,9 @@ html, body {
 }
 .text-btn:hover { background: var(--hover); color: var(--text); }
 .text-btn.hidden { display: none; }
+/* #livingMindBtn is an <a>, not a <button> (see index.html's comment — it opens a real
+   separate page in a new tab) — reset the anchor defaults .text-btn doesn't already cover. */
+a.text-btn { display: inline-block; text-decoration: none; }
 .text-btn.small {
   border: 1px solid var(--border);
   font-size: 11px;
@@ -567,9 +557,15 @@ html, body {
 }
 .attachment-chip.not-extractable { opacity: 0.6; font-style: italic; }
 
-#micBtn.recording {
+/* Armed (listening for "hey Jarvis") vs actively capturing a command after hearing it —
+   two distinct pulses so it's obvious at a glance which phase the mic is in. */
+#micBtn.wake-armed {
+  color: var(--accent);
+  animation: pulse 1.6s infinite ease-in-out;
+}
+#micBtn.wake-armed.wake-capturing {
   color: var(--danger);
-  animation: pulse 1s infinite ease-in-out;
+  animation: pulse 0.8s infinite ease-in-out;
 }
 #micStatus {
   font-size: 11px;
@@ -761,193 +757,6 @@ html, body {
 .move-list .move-item:hover { background: var(--hover); }
 .move-list .move-item.active { color: var(--accent); font-weight: 600; }
 
-/* ---------- Phase 7: Overseer + team dashboards ---------- */
-
-#dashboardView {
-  flex: 1;
-  overflow-y: auto;
-  padding: 20px 24px 40px 24px;
-}
-#dashboardView.hidden { display: none; }
-#overseerView.hidden, #teamDashboardView.hidden { display: none; }
-
-.dashboard-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 18px;
-}
-.dashboard-header h1 { font-size: 20px; margin: 0; }
-.dashboard-section { margin-top: 26px; }
-.dashboard-section h2 {
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-  margin: 0 0 10px 0;
-}
-
-#backToOverseerBtn { margin-bottom: 14px; padding: 6px 4px; }
-
-/* Team tiles */
-.team-tiles {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 12px;
-}
-.team-tile {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 14px;
-  cursor: pointer;
-  background: var(--bg-sidebar);
-  transition: transform 0.1s ease, border-color 0.15s ease;
-}
-.team-tile:hover { transform: translateY(-1px); border-color: var(--accent); }
-.team-tile .tile-icon { font-size: 22px; }
-.team-tile .tile-name { font-weight: 600; font-size: 13.5px; margin-top: 6px; }
-.team-tile .tile-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  margin-top: 8px;
-  font-size: 11px;
-  color: var(--text-dim);
-}
-.team-tile .tile-status::before {
-  content: "";
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--text-dim);
-}
-.team-tile.status-working .tile-status::before { background: #ffb02e; animation: pulse 1.2s infinite ease-in-out; }
-.team-tile.status-working .tile-status { color: #ffb02e; }
-.team-tile.status-blocked .tile-status::before { background: var(--danger); }
-.team-tile.status-blocked .tile-status { color: var(--danger); }
-.team-tile.status-idle .tile-status::before { background: #34c759; }
-
-.team-status-pill {
-  font-size: 11px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: var(--hover);
-  color: var(--text-dim);
-}
-.team-status-pill.status-working { background: rgba(255, 176, 46, 0.15); color: #ffb02e; }
-.team-status-pill.status-blocked { background: rgba(229, 72, 77, 0.15); color: var(--danger); }
-.team-status-pill.status-idle { background: rgba(52, 199, 89, 0.15); color: #34c759; }
-
-/* Queue (approvals + proposed skills, merged) */
-.queue-list, .cross-team-log, .activity-feed, .task-history { display: flex; flex-direction: column; gap: 8px; }
-.queue-empty, .log-empty, .feed-empty, .history-empty {
-  font-size: 12.5px;
-  color: var(--text-dim);
-  font-style: italic;
-}
-.queue-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--bg-sidebar);
-}
-.queue-item .queue-badge {
-  font-size: 10px;
-  font-weight: 700;
-  padding: 2px 7px;
-  border-radius: 999px;
-  flex-shrink: 0;
-}
-.queue-item .queue-badge.tier-4 { background: rgba(229, 72, 77, 0.15); color: var(--danger); }
-.queue-item .queue-badge.tier-3 { background: rgba(255, 176, 46, 0.15); color: #ffb02e; }
-.queue-item .queue-badge.skill { background: rgba(10, 132, 255, 0.15); color: var(--accent); }
-.queue-item .queue-title { flex: 1; font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.queue-item .queue-team { font-size: 11px; color: var(--text-dim); flex-shrink: 0; }
-.queue-item .queue-actions { display: flex; gap: 4px; flex-shrink: 0; }
-.queue-item .queue-actions button {
-  border: none;
-  border-radius: 6px;
-  padding: 4px 9px;
-  font-size: 11px;
-  cursor: pointer;
-}
-.queue-item .queue-actions .approve { background: var(--accent); color: #fff; }
-.queue-item .queue-actions .deny { background: var(--hover); color: var(--text); }
-
-/* Cross-team log */
-.log-entry {
-  padding: 9px 12px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  font-size: 12.5px;
-  background: var(--bg-sidebar);
-}
-.log-entry .log-link { color: var(--accent); font-weight: 600; }
-.log-entry .log-title { color: var(--text-dim); margin-top: 2px; }
-
-/* System health strip */
-.system-health-strip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.health-chip {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-radius: 999px;
-  background: var(--hover);
-  font-size: 12px;
-  color: var(--text-dim);
-}
-.health-chip.ok { color: #34c759; }
-.health-chip.warn { color: #ffb02e; }
-
-/* Team activity feed */
-.feed-entry {
-  padding: 8px 12px;
-  border-left: 2px solid var(--border);
-  font-size: 12.5px;
-  color: var(--text-dim);
-}
-.feed-entry .feed-time { font-size: 10.5px; opacity: 0.7; margin-right: 6px; }
-
-/* Task history */
-.history-entry {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  font-size: 12.5px;
-  background: var(--bg-sidebar);
-}
-.history-entry .outcome-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.history-entry .outcome-success .outcome-dot { background: #34c759; }
-.history-entry .outcome-failed .outcome-dot, .history-entry .outcome-blocked .outcome-dot { background: var(--danger); }
-.history-entry .outcome-denied .outcome-dot { background: var(--text-dim); }
-.history-entry .history-action { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.history-entry .history-time { font-size: 11px; color: var(--text-dim); flex-shrink: 0; }
-
-.team-health-block { font-size: 12.5px; color: var(--text-dim); }
-.team-health-block .health-list { margin: 4px 0 0 0; padding-left: 18px; }
-
-.vpn-status-badge {
-  font-size: 11px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: var(--hover);
-  color: var(--text-dim);
-}
-.vpn-status-badge.ok { color: #34c759; }
-.vpn-status-badge.hidden { display: none; }
-
 /* ---------- Responsive ---------- */
 
 @media (max-width: 860px) {
@@ -962,12 +771,4 @@ html, body {
   .sidebar-toggle { display: flex; }
   #chatHeader { padding-left: 56px; }
   .bubble { max-width: 88vw; }
-  .view-tabs { padding-left: 56px; }
-  .team-tiles { grid-template-columns: repeat(2, 1fr); }
-  .queue-item { flex-wrap: wrap; }
-  .queue-item .queue-actions { width: 100%; justify-content: flex-end; }
-}
-
-@media (max-width: 480px) {
-  .team-tiles { grid-template-columns: 1fr; }
 }

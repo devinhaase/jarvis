@@ -12,9 +12,9 @@ into a dedicated "Team Board" conversation, and marks the incident acknowledged.
 
 Still goes through every normal safety mechanism a user-triggered turn would: Tier 2+
 tools inside that team's response still need approval (broadcast to connected devices,
-same as always), the kill switch still applies, offense-authorization still gates any
-Hacking-team tool. Autonomous dispatch means "no human had to notice and ask" — it does
-not mean "no human has to approve a sensitive action."
+same as always), offense-authorization still gates any Hacking-team tool. Autonomous
+dispatch means "no human had to notice and ask" — it does not mean "no human has to
+approve a sensitive action."
 """
 
 import os

@@ -8,9 +8,9 @@ ALL_TOOLS by `team=`), and a short prompt fragment describing its scope. The act
 reasoning loop is JarvisBrain/Coordinator, unchanged — team_router.py invokes it once per
 routed team with that team's tool subset substituted in.
 
-Tools with team=None (the kill switch, get_self_knowledge) are coordinator-level and
-appended to every team's tool set — see tools.py's registration comments for why those
-specifically stay outside any one team's ownership.
+Tools with team=None (get_self_knowledge) are coordinator-level and appended to every
+team's tool set — see tools.py's registration comments for why it specifically stays
+outside any one team's ownership.
 """
 
 from tools import ALL_TOOLS
@@ -36,9 +36,9 @@ class Team:
         """Phase 5: active, non-flagged skills for this team, injected into team_context
         (see team_router.py) as documented recipes the model can choose to follow. This is
         a prompt hint, not a new execution path — following a skill still means emitting
-        normal [TOOL: ...] calls that go through the exact same tier/authorization/kill-
-        switch gates as if the model had thought of the sequence fresh. Returns "" (no
-        section at all) when there are no active skills yet, rather than an empty header."""
+        normal [TOOL: ...] calls that go through the exact same tier/authorization gates
+        as if the model had thought of the sequence fresh. Returns "" (no section at all)
+        when there are no active skills yet, rather than an empty header."""
         import skills
         active = skills.active_skills_for_team(self.key)
         if not active:

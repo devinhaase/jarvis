@@ -53,6 +53,13 @@
       <button id="toolsBtn" class="text-btn">🛠 Tools</button>
       <button id="teamsBtn" class="text-btn">🤖 Teams</button>
       <button id="skillsBtn" class="text-btn">🧩 Skills<span id="skillsPendingBadge" class="pending-badge hidden">0</span></button>
+      <!-- The Overseer/team dashboard (formerly an in-SPA Dashboard/Chat tab here — see
+           task.md's entry on why it moved) and Phase 8c's Living Mind (its own three.js
+           scene, own /ws/mind socket) are both full standalone pages now, so both open in
+           a new tab rather than swapping into #contentArea — that way a new chat here
+           always opens straight to chat, and either view can sit on its own screen. -->
+      <a id="dashboardBtn" class="text-btn" href="/dashboard" target="_blank" rel="noopener">📊 Dashboard</a>
+      <a id="livingMindBtn" class="text-btn" href="/mind" target="_blank" rel="noopener">🧠 Living Mind</a>
       <span id="connStatus" class="conn-status offline">connecting…</span>
     </div>
   </aside>
@@ -60,15 +67,7 @@
   <div id="sidebarOverlay"></div>
 
   <div id="contentArea">
-    <!-- Phase 7: Overseer/team dashboards default view, Chat one click away — see
-         REMOTE_ACCESS.md-adjacent task.md entry for why (chat's existing UX stays
-         completely untouched underneath this tab switch). -->
-    <div id="viewTabs" class="view-tabs">
-      <button id="dashboardTabBtn" class="view-tab active">📊 Dashboard</button>
-      <button id="chatTabBtn" class="view-tab">💬 Chat</button>
-    </div>
-
-    <main id="main" class="hidden">
+    <main id="main">
       <header id="chatHeader">
         <h1 id="convTitle" contenteditable="true" spellcheck="false">Jarvis</h1>
         <span id="projectBadge" class="project-badge hidden"></span>
@@ -92,60 +91,6 @@
         <button id="sendBtn" type="submit" class="send-btn" title="Send">➤</button>
       </form>
     </main>
-
-    <div id="dashboardView">
-      <div id="overseerView">
-        <header class="dashboard-header">
-          <h1>Overseer</h1>
-          <span id="vpnStatusBadge" class="vpn-status-badge hidden"></span>
-        </header>
-
-        <div id="teamTiles" class="team-tiles"></div>
-
-        <div class="dashboard-section">
-          <h2>Needs your attention</h2>
-          <div id="overseerQueue" class="queue-list"></div>
-        </div>
-
-        <div class="dashboard-section">
-          <h2>Cross-team activity</h2>
-          <div id="crossTeamLog" class="cross-team-log"></div>
-        </div>
-
-        <div class="dashboard-section">
-          <h2>System health</h2>
-          <div id="systemHealthStrip" class="system-health-strip"></div>
-        </div>
-      </div>
-
-      <div id="teamDashboardView" class="hidden">
-        <button id="backToOverseerBtn" class="text-btn">← Overseer</button>
-        <header class="dashboard-header">
-          <h1 id="teamDashTitle"></h1>
-          <span id="teamDashStatus" class="team-status-pill"></span>
-        </header>
-
-        <div class="dashboard-section">
-          <h2>Live activity</h2>
-          <div id="teamActivityFeed" class="activity-feed"></div>
-        </div>
-
-        <div class="dashboard-section">
-          <h2>Waiting on you</h2>
-          <div id="teamQueue" class="queue-list"></div>
-        </div>
-
-        <div class="dashboard-section">
-          <h2>Recent task history</h2>
-          <div id="teamHistory" class="task-history"></div>
-        </div>
-
-        <div class="dashboard-section">
-          <h2>Team health</h2>
-          <div id="teamHealthBlock" class="team-health-block"></div>
-        </div>
-      </div>
-    </div>
   </div>
 
   <div id="toolsModal" class="modal-overlay hidden">

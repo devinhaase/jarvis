@@ -291,7 +291,18 @@ async def main():
         check("get_overseer_snapshot returns type=overseer_snapshot", snap.get("type") == "overseer_snapshot", f"got: {snap}")
         check("snapshot lists all 5 teams", {t["key"] for t in snap.get("teams", [])} == set(server_module.TEAM_KEYS), f"got: {snap.get('teams')}")
         check("every team starts idle in a fresh snapshot", all(t["status"] == "idle" for t in snap["teams"]), f"got: {snap['teams']}")
-        check("snapshot includes an empty queue initially", snap.get("queue") == [])
+        # NOT asserting the queue is fully empty here: _overseer_snapshot() folds in real
+        # proposed skills from skills.list_skills(status="proposed"), which reads the
+        # project's actual SKILLS/ directory on disk — unlike devices.json/the conversation
+        # DB above, that's not something this test isolates into a temp dir, so a real
+        # proposed skill sitting in SKILLS/ (a perfectly normal state for this project to be
+        # in) would make a blanket "queue == []" assertion flaky against ambient state this
+        # test doesn't control. What IS test-isolated and worth pinning: no Tier-3/4
+        # *approval* ever survives past this fresh server's own boot — pending_approval_meta
+        # is a fresh in-process dict every run, independent of SKILLS/.
+        queue = snap.get("queue", [])
+        check("snapshot's queue has no leftover approvals in a fresh server (skills may legitimately be non-empty — see comment above)",
+              all(item.get("kind") != "approval" for item in queue), f"got: {queue}")
         check("snapshot includes integration + vpn health blocks", "integration" in snap and "vpn" in snap)
 
         await ws.send(json.dumps({"type": "get_team_dashboard", "team": "network"}))
@@ -365,6 +376,12 @@ asyncio.run(_run_approval_team_test())
 # ---------------------------------------------------------------------------
 section("7. Static checks — client-side dashboard wiring actually present")
 # ---------------------------------------------------------------------------
+# The Overseer/team dashboard moved out of index.html into its own standalone page
+# (dashboard.html/dashboard.js/dashboard.css, served at /dashboard) — see task.md's entry
+# on why: a new chat should always open straight to chat, and the dashboard needed to be
+# able to live on its own screen/tab. These checks were rewritten to match; the WS protocol
+# itself (get_overseer_snapshot/get_team_dashboard/team_status_changed/approve) is
+# unchanged and already covered end-to-end by sections 1-6 above.
 
 import re
 
@@ -372,33 +389,42 @@ with open("webapp/index.html", "r", encoding="utf-8") as f:
     index_html = f.read()
 with open("webapp/app.js", "r", encoding="utf-8") as f:
     app_js = f.read()
-with open("webapp/style.css", "r", encoding="utf-8") as f:
-    style_css = f.read()
+with open("webapp/dashboard.html", "r", encoding="utf-8") as f:
+    dashboard_html = f.read()
+with open("webapp/dashboard.js", "r", encoding="utf-8") as f:
+    dashboard_js = f.read()
+with open("webapp/dashboard.css", "r", encoding="utf-8") as f:
+    dashboard_css = f.read()
 with open("webapp/sw.js", "r", encoding="utf-8") as f:
     sw_js = f.read()
 
-check("index.html has the Dashboard/Chat tab switcher, Dashboard active by default", 'id="dashboardTabBtn" class="view-tab active"' in index_html)
-check("index.html's #main starts hidden (Dashboard is the default landing view)", 'id="main" class="hidden"' in index_html)
-check("index.html has team tiles, queue, cross-team log, and health strip containers", all(f'id="{i}"' in index_html for i in ("teamTiles", "overseerQueue", "crossTeamLog", "systemHealthStrip")))
-check("index.html has the team drill-down view with its own back button", 'id="teamDashboardView"' in index_html and 'id="backToOverseerBtn"' in index_html)
+check("index.html no longer has the old in-SPA Dashboard/Chat tab switcher", 'id="dashboardTabBtn"' not in index_html and 'id="chatTabBtn"' not in index_html)
+check("index.html's #main is not hidden by default (chat is always the landing view now)", 'id="main" class="hidden"' not in index_html and '<main id="main">' in index_html)
+check("index.html's sidebar has a Dashboard button opening /dashboard in a new tab", re.search(r'<a id="dashboardBtn"[^>]*href="/dashboard"[^>]*target="_blank"', index_html) is not None)
+check("app.js no longer defines the old in-SPA dashboard render functions", not any(f in app_js for f in ("function renderOverseerSnapshot", "function renderTeamDashboard", "function showDashboardView")))
 
-check("app.js wires the tab switcher to showDashboardView/showChatView", "dashboardTabBtn.addEventListener" in app_js and "chatTabBtn.addEventListener" in app_js)
-check("app.js requests the overseer snapshot on 'ready' (populated before you even click the tab)", re.search(r'case\s+"ready":.*?get_overseer_snapshot', app_js, re.S) is not None)
-check("app.js handles overseer_snapshot/team_dashboard/team_status_changed/cross_team_incident/approval_resolved",
-      all(f'case "{t}":' in app_js for t in ("overseer_snapshot", "team_dashboard", "team_status_changed", "cross_team_incident", "approval_resolved")))
-check("app.js's queue rendering wires real Approve/Deny buttons using the same 'approve' WS message the chat banner uses",
-      re.search(r'send\(\{\s*type:\s*"approve",\s*approval_id:\s*item\.id,\s*approved:\s*true\s*\}\)', app_js) is not None)
-check("refreshCurrentDashboardView is wired into skill_updated/approval_request/approval_resolved (the actual live-update triggers)",
-      app_js.count("refreshCurrentDashboardView()") >= 3)
-check("app.js defines openDashboardTeam for the notification deep-link (?team=)", "function openDashboardTeam" in app_js)
-check("app.js's postMessage listener handles open_dashboard from the service worker", "open_dashboard" in app_js)
+check("server.py serves dashboard.html at GET /dashboard", '@app.get("/dashboard")' in open("server.py", encoding="utf-8").read())
+check("server.py's /ws hello supports dashboard_only (skips conversation creation)", "dashboard_only" in open("server.py", encoding="utf-8").read())
 
-check("style.css defines #contentArea (the new flex wrapper for tabs + Chat/Dashboard)", "#contentArea" in style_css)
-check("style.css styles team tiles with distinct working/blocked/idle states", ".status-working" in style_css and ".status-blocked" in style_css and ".team-tile" in style_css)
-check("style.css has a mobile breakpoint adjustment for team tiles", "team-tiles" in style_css and "@media (max-width: 480px)" in style_css)
+check("dashboard.html has team tiles, queue, cross-team log, and health strip containers", all(f'id="{i}"' in dashboard_html for i in ("teamTiles", "overseerQueue", "crossTeamLog", "systemHealthStrip")))
+check("dashboard.html has the team drill-down view with its own back button", 'id="teamDashboardView"' in dashboard_html and 'id="backToOverseerBtn"' in dashboard_html)
+check("dashboard.html links both style.css (shared tokens/components) and its own dashboard.css", '"/style.css"' in dashboard_html and '"/dashboard.css"' in dashboard_html)
 
-check("sw.js's push handler carries the dashboard field through to notification data", '"dashboard": payload.dashboard' in sw_js.replace("data: { conversation_id: payload.conversation_id || null, dashboard: payload.dashboard || null }", '"dashboard": payload.dashboard') or "dashboard: payload.dashboard" in sw_js)
-check("sw.js's notificationclick deep-links to a team dashboard when present", "open_dashboard" in sw_js and "?team=" in sw_js)
+check("dashboard.js connects with hello's dashboard_only:true", "dashboard_only: true" in dashboard_js)
+check("dashboard.js handles overseer_snapshot/team_dashboard/team_status_changed/cross_team_incident/approval_resolved",
+      all(f'case "{t}":' in dashboard_js for t in ("overseer_snapshot", "team_dashboard", "team_status_changed", "cross_team_incident", "approval_resolved")))
+check("dashboard.js's queue rendering wires real Approve/Deny buttons using the same 'approve' WS message the chat banner uses",
+      re.search(r'send\(\{\s*type:\s*"approve",\s*approval_id:\s*item\.id,\s*approved:\s*true\s*\}\)', dashboard_js) is not None)
+check("refreshCurrentView is wired into skill_updated/approval_request/approval_resolved (the actual live-update triggers)",
+      dashboard_js.count("refreshCurrentView()") >= 3)
+check("dashboard.js reads ?team= for a fresh-tab notification deep link", "params.get(\"team\")" in dashboard_js)
+
+check("dashboard.css styles team tiles with distinct working/blocked/idle states", ".status-working" in dashboard_css and ".status-blocked" in dashboard_css and ".team-tile" in dashboard_css)
+check("dashboard.css has a mobile breakpoint adjustment for team tiles", "team-tiles" in dashboard_css and "@media (max-width: 480px)" in dashboard_css)
+
+check("sw.js's push handler carries the dashboard field through to notification data", "dashboard: payload.dashboard" in sw_js)
+check("sw.js's notificationclick deep-links a fresh tab straight to /dashboard?team=", "/dashboard?team=" in sw_js)
+check("sw.js matches an already-open client by pathname before postMessage-ing it (chat vs dashboard are different pages now)", "pathname === wantPath" in sw_js)
 
 print(f"\n{'=' * 55}\n{PASS} passed, {FAIL} failed\n{'=' * 55}")
 sys.exit(1 if FAIL else 0)

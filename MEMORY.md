@@ -1,6 +1,6 @@
 # MEMORY.md — What Jarvis has learned
 
-_Auto-generated from data/semantic_memory.json — do not hand-edit, changes will be overwritten on the next fact/preference update. Last generated: 2026-08-08 22:01 UTC._
+_Auto-generated from data/semantic_memory.json — do not hand-edit, changes will be overwritten on the next fact/preference update. Last generated: 2026-08-09 01:19 UTC._
 
 ## Ongoing facts
 
@@ -28,6 +28,20 @@ _Auto-generated from data/semantic_memory.json — do not hand-edit, changes wil
 - Kill switch is not armed; unknown device with MAC aa:bb:cc:11:22:33 detected.
 - Unknown device joined local network with MAC address aa:bb:cc:11:22:33
 - overwrite_note requires 'note_path' argument instead of 'note_title'
+- Unknown device with MAC aa:bb:cc:11:22:33 joined local network; kill switch ARMED.
+- Kill switch is ARMED (reason: end to end), unknown device with MAC aa:bb:cc:11:22:33 joined network; MAC unrecognized in ARP table
+- Guest List & Addresses_.pdf attached but not readable
+- Kill switch is ARMED (reason: end to end) — 'disarm_kill_switch' failed with unexpected argument
+- disarm_kill_switch() failed with unexpected keyword argument 'reason'
+- Reason for disarming: "to ensure firewall access and verify safety"
+- Disarm completed with reason "to ensure firewall access and verify safety"
+- The kill switch is ARMED (reason: end to end), and the MAC address aa:bb:cc:11:22:33 is unrecognized.
+- Disarmed kill switch; firewall access pending verification
+- Unknown device with MAC address aa:bb:cc:11:22:33 joined local network; kill switch ARMED.
+- Kill switch is not armed; unknown device with MAC aa:bb:cc:11:22:33 joined network.
+- Kill switch ARMED (reason: end to end), unknown device with MAC aa:bb:cc:11:22:33 joined network; MAC unrecognized in ARP table
+- Unknown device joined local network with MAC address aa:bb:cc:11:22:33; kill switch ARMED (reason: end to end)
+- Unknown device with MAC address aa:bb:cc:11:22:33 joined local network; kill switch ARMED (reason: end to end)
 
 ## Active projects
 

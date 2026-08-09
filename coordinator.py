@@ -19,28 +19,9 @@ from tools import ALL_TOOLS, Tier
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Confirm
-from security_hardening import is_kill_switch_armed, kill_switch_status, redact, KillSwitchActive
+from security_hardening import redact
 
 console = Console()
-
-
-_KILL_SWITCH_EXEMPT = {"disarm_kill_switch"}  # must always be reachable, or arming it is one-way
-
-
-def _check_kill_switch(tool):
-    """Phase 8: the kill switch is checked at the same dispatch point offense-authorization
-    already is — a single choke point every execution path goes through, not something a
-    caller could bypass by calling a different entrypoint. Tier 1 (read-only) tools still
-    run while armed — the point is to stop *actions*, not to also break the ability to ask
-    Jarvis what's going on. disarm_kill_switch is exempt regardless of its own tier — a
-    Tier-2 tool that the kill switch itself blocks would make arming it a one-way door."""
-    if tool.tier == Tier.TIER_1 or tool.name in _KILL_SWITCH_EXEMPT or not is_kill_switch_armed():
-        return
-    status = kill_switch_status()
-    raise KillSwitchActive(
-        f"Kill switch is ARMED (reason: {status.get('reason', '?')}) — "
-        f"'{tool.name}' (Tier {tool.tier.name}) was refused. Call disarm_kill_switch to resume."
-    )
 
 # Common parameter names offense-tagged tools use for "the thing being scanned/queried" —
 # scan_ports/run_recon_pipeline use "target", shodan_lookup uses "query", dns_recon/
@@ -144,10 +125,11 @@ class Coordinator:
 
         `team` (Phase 7): which team's turn this is, for episode/approval attribution on
         the Overseer dashboard. Deliberately the *caller's* active-team context, not
-        `tool.team` — a coordinator-level tool (team=None on the Tool itself, e.g. the kill
-        switch) still ran as part of some specific team's turn, and that's what a dashboard
-        needs to show it under, not "no team." Falls back to `tool.team` only when the
-        caller didn't say (e.g. a non-team-routed direct call) — still better than nothing.
+        `tool.team` — a coordinator-level tool (team=None on the Tool itself, e.g.
+        get_self_knowledge) still ran as part of some specific team's turn, and that's what
+        a dashboard needs to show it under, not "no team." Falls back to `tool.team` only
+        when the caller didn't say (e.g. a non-team-routed direct call) — still better than
+        nothing.
         """
         results_summary = ""
 
@@ -171,14 +153,6 @@ class Coordinator:
 
             # 1. REASON
             console.print(f"\n[bold magenta]🤔 Reason:[/bold magenta] Using [bold]{tool_name}[/bold] (Tier {tool.tier.name})")
-
-            try:
-                _check_kill_switch(tool)
-            except KillSwitchActive as e:
-                console.print(f"[bold red]🛑 Kill switch:[/bold red] {e}")
-                self.memory.log_episode(tool_name, str(e), tool.tier.name, team=episode_team, outcome="blocked")
-                results_summary += f"{tool_name}: {e}\n"
-                break
 
             # 2. ACT
             if not self._request_approval(tool_name, tool.tier, team=episode_team):
@@ -232,13 +206,6 @@ class Coordinator:
         _autofill_created_by_team(tool_name, args, episode_team)
 
         console.print(f"\n[bold magenta]🤔 Reason:[/bold magenta] Using [bold]{tool_name}[/bold] (Tier {tool.tier.name})")
-
-        try:
-            _check_kill_switch(tool)
-        except KillSwitchActive as e:
-            console.print(f"[bold red]🛑 Kill switch:[/bold red] {e}")
-            self.memory.log_episode(tool_name, str(e), tool.tier.name, team=episode_team, outcome="blocked")
-            return None
 
         if not self._request_approval(tool_name, tool.tier, team=episode_team):
             msg = f"Execution of '{tool_name}' denied/cancelled by user."

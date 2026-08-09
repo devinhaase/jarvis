@@ -1,7 +1,6 @@
 """
 Tests for Phase 8: security hardening — subprocess env-stripping (run_hardened), log/output
-redaction (redact), the kill switch (arm/disarm/status + dispatch-layer enforcement in
-coordinator.py), device-auth rate limiting (AuthRateLimiter), and the self-audit tool.
+redaction (redact), device-auth rate limiting (AuthRateLimiter), and the self-audit tool.
 
 Run: python test_security_hardening_phase8.py
 """
@@ -10,8 +9,6 @@ import os
 import sys
 import time
 import json
-import shutil
-import tempfile
 
 PASS = 0
 FAIL = 0
@@ -76,98 +73,7 @@ check("long hex token redacted", "[REDACTED:HEX_TOKEN]" in sh.redact("a" * 48))
 check("ordinary text passes through unchanged", sh.redact("the system is healthy, cpu at 12%") == "the system is healthy, cpu at 12%")
 check("empty/None input doesn't raise", sh.redact("") == "" and sh.redact(None) is None)
 
-# ---------------------------------------------------------------------------
-section("Kill switch")
-# ---------------------------------------------------------------------------
-
-# Isolate from any real kill-switch state a live server might have set.
-_real_file = sh._KILL_SWITCH_FILE
-_tmp_dir = tempfile.mkdtemp()
-sh._KILL_SWITCH_FILE = os.path.join(_tmp_dir, "KILL_SWITCH")
-
-try:
-    check("not armed by default", sh.is_kill_switch_armed() is False)
-    check("status reports not armed", sh.kill_switch_status() == {"armed": False})
-
-    msg = sh.arm_kill_switch("testing")
-    check("arm returns a confirmation message", "ARMED" in msg)
-    check("is_kill_switch_armed() now True", sh.is_kill_switch_armed() is True)
-    status = sh.kill_switch_status()
-    check("status reports armed with reason", status["armed"] is True and status["reason"] == "testing", f"got {status}")
-
-    msg2 = sh.disarm_kill_switch()
-    check("disarm returns confirmation", "disarmed" in msg2.lower())
-    check("is_kill_switch_armed() now False", sh.is_kill_switch_armed() is False)
-
-    msg3 = sh.disarm_kill_switch()
-    check("disarming when not armed is a no-op, not an error", "was not armed" in msg3.lower())
-finally:
-    sh._KILL_SWITCH_FILE = _real_file
-    shutil.rmtree(_tmp_dir, ignore_errors=True)
-
-# ---------------------------------------------------------------------------
-section("Kill switch enforcement at dispatch (coordinator.py)")
-# ---------------------------------------------------------------------------
-
 import coordinator as coord
-
-_real_file2 = sh._KILL_SWITCH_FILE
-_tmp_dir2 = tempfile.mkdtemp()
-sh._KILL_SWITCH_FILE = os.path.join(_tmp_dir2, "KILL_SWITCH")
-# coordinator.py did `from security_hardening import is_kill_switch_armed, kill_switch_status`
-# — those names are bound to the SAME function objects as sh.is_kill_switch_armed etc., which
-# read sh._KILL_SWITCH_FILE as a global at call time, so patching it on sh above is enough;
-# no need to touch anything on the coordinator module itself.
-try:
-    from tools import Tool, Tier
-
-    tier1_tool = Tool("t1", "read-only", Tier.TIER_1, lambda: "ok")
-    tier2_tool = Tool("t2", "writes something", Tier.TIER_2, lambda: "ok")
-    exempt_tool = Tool("disarm_kill_switch", "must always work", Tier.TIER_2, lambda: "ok")
-
-    check("Tier 1 tool passes through even when unarmed (baseline)", coord._check_kill_switch(tier1_tool) is None)
-
-    sh.arm_kill_switch("dispatch test")
-    try:
-        coord._check_kill_switch(tier1_tool)
-        check("Tier 1 tools still run while armed (read-only shouldn't be blocked)", True)
-    except sh.KillSwitchActive:
-        check("Tier 1 tools still run while armed", False, "Tier 1 was blocked")
-
-    try:
-        coord._check_kill_switch(tier2_tool)
-        check("Tier 2+ tool is refused while armed", False, "no exception raised")
-    except sh.KillSwitchActive as e:
-        check("Tier 2+ tool is refused while armed", "ARMED" in str(e), f"got: {e}")
-
-    try:
-        coord._check_kill_switch(exempt_tool)
-        check("disarm_kill_switch is exempt from its own block (else arming is one-way)", True)
-    except sh.KillSwitchActive:
-        check("disarm_kill_switch is exempt from its own block", False, "was blocked")
-
-    sh.disarm_kill_switch()
-    check("Tier 2+ tool runs again after disarm", coord._check_kill_switch(tier2_tool) is None)
-finally:
-    sh._KILL_SWITCH_FILE = _real_file2
-    shutil.rmtree(_tmp_dir2, ignore_errors=True)
-
-# ---------------------------------------------------------------------------
-section("run_tools() end-to-end honors the kill switch")
-# ---------------------------------------------------------------------------
-
-_real_file3 = sh._KILL_SWITCH_FILE
-_tmp_dir3 = tempfile.mkdtemp()
-sh._KILL_SWITCH_FILE = os.path.join(_tmp_dir3, "KILL_SWITCH")
-try:
-    sh.arm_kill_switch("end to end")
-    c = coord.Coordinator(approval_fn=lambda name, tier: True)
-    summary = c.run_tools([{"tool": "create_backup", "args": {}}])
-    check("run_tools halts on an armed kill switch instead of executing", "Kill switch is ARMED" in summary, f"got: {summary}")
-finally:
-    sh.disarm_kill_switch()
-    sh._KILL_SWITCH_FILE = _real_file3
-    shutil.rmtree(_tmp_dir3, ignore_errors=True)
 
 # ---------------------------------------------------------------------------
 section("AuthRateLimiter")
@@ -198,7 +104,7 @@ section("run_self_audit()")
 # ---------------------------------------------------------------------------
 
 audit = sh.run_self_audit()
-check("returns kill_switch/findings/ok/status keys", all(k in audit for k in ("kill_switch", "findings", "ok", "status")), f"got: {audit.keys()}")
+check("returns findings/ok/status keys", all(k in audit for k in ("findings", "ok", "status")), f"got: {audit.keys()}")
 check("status is CLEAN or ATTENTION", audit["status"] in ("CLEAN", "ATTENTION"), f"got: {audit['status']}")
 check("no sensitive files reported as tracked in git in this real repo",
       not any("SENSITIVE FILES ARE TRACKED" in f for f in audit["findings"]), f"findings: {audit['findings']}")
@@ -209,11 +115,8 @@ section("Tools registered in ALL_TOOLS")
 
 from tools import ALL_TOOLS, Tier as T
 
-for name in ("arm_kill_switch", "disarm_kill_switch", "kill_switch_status", "run_self_audit"):
-    check(f"'{name}' registered in ALL_TOOLS", name in ALL_TOOLS, f"available: {sorted(ALL_TOOLS.keys())}")
-
-check("arm_kill_switch is Tier 1 (must never be blocked)", ALL_TOOLS["arm_kill_switch"].tier == T.TIER_1)
-check("disarm_kill_switch is Tier 2", ALL_TOOLS["disarm_kill_switch"].tier == T.TIER_2)
+check("'run_self_audit' registered in ALL_TOOLS", "run_self_audit" in ALL_TOOLS, f"available: {sorted(ALL_TOOLS.keys())}")
+check("run_self_audit is Tier 1 (read-only)", ALL_TOOLS["run_self_audit"].tier == T.TIER_1)
 
 
 print(f"\n{'=' * 55}\n{PASS} passed, {FAIL} failed\n{'=' * 55}")

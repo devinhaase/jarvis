@@ -12,12 +12,16 @@ and closes gaps those didn't cover:
      key blocks) out of any text before it's logged or persisted. Best-effort pattern
      matching, same "probabilistic, not a guarantee" honesty as Phase 7's injection
      detector — documented as a known limitation, not oversold.
-  3. KillSwitch — a file-flag emergency stop. When armed, every Tier 2+ tool call is
-     refused before it executes. Checked at the same dispatch point AuthorizationCheck
-     already runs at (coordinator.py), not bolted on somewhere it could be skipped.
+  3. AuthRateLimiter — locks out a source after repeated failed device-auth attempts.
   4. run_self_audit() — a read-only Tier-1 tool that checks this project's own posture:
-     kill switch state, whether secret-looking material is staged for a git commit,
-     which subprocess call sites are hardened vs. not, device count/token age.
+     whether secret-looking material is staged for a git commit, which subprocess call
+     sites are hardened vs. not, device count/token age.
+
+Note: this module originally also had a #3, a file-flag "kill switch" emergency stop
+(arm/disarm/status, checked in coordinator.py at the same dispatch point
+AuthorizationCheck runs at). Removed at Devin's explicit request — see task.md's entry
+for the removal and the reasoning discussed at the time, rather than silently vanishing
+from history the way a plain deletion would.
 
 Scope boundary, deliberate not accidental: this hardens the highest-risk subprocess call
 sites (run_local_script, generate_payload, run_exploit_module — the ones that take
@@ -110,51 +114,7 @@ def redact(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 3. Kill switch
-# ---------------------------------------------------------------------------
-
-_KILL_SWITCH_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "KILL_SWITCH")
-
-
-class KillSwitchActive(Exception):
-    """Raised at tool dispatch when the kill switch is armed and a gated tier is requested."""
-    pass
-
-
-def is_kill_switch_armed() -> bool:
-    return os.path.exists(_KILL_SWITCH_FILE)
-
-
-def arm_kill_switch(reason: str = ""):
-    """Emergency stop: every Tier 2+ tool call is refused until disarmed. File-based (not
-    in-memory) so it survives a server restart and is visible/removable by hand if the
-    agent process itself is unresponsive."""
-    os.makedirs(os.path.dirname(_KILL_SWITCH_FILE), exist_ok=True)
-    with open(_KILL_SWITCH_FILE, "w") as f:
-        json.dump({"armed_at": time.time(), "reason": reason or "no reason given"}, f)
-    return f"Kill switch ARMED. All Tier 2+ tool calls will be refused until disarm_kill_switch() is called. Reason: {reason or '(none given)'}"
-
-
-def disarm_kill_switch():
-    if os.path.exists(_KILL_SWITCH_FILE):
-        os.remove(_KILL_SWITCH_FILE)
-        return "Kill switch disarmed. Normal tool execution resumed."
-    return "Kill switch was not armed."
-
-
-def kill_switch_status() -> dict:
-    if not is_kill_switch_armed():
-        return {"armed": False}
-    try:
-        with open(_KILL_SWITCH_FILE) as f:
-            info = json.load(f)
-    except Exception:
-        info = {}
-    return {"armed": True, **info}
-
-
-# ---------------------------------------------------------------------------
-# 3b. Auth rate limiting / lockout
+# 3. Auth rate limiting / lockout
 # ---------------------------------------------------------------------------
 
 class AuthRateLimiter:
@@ -206,12 +166,6 @@ def run_self_audit() -> dict:
     findings = []
     ok = []
 
-    ks = kill_switch_status()
-    if ks["armed"]:
-        findings.append(f"Kill switch is ARMED (reason: {ks.get('reason', '?')}) — all Tier 2+ tools are currently refused.")
-    else:
-        ok.append("Kill switch not armed (normal operating state).")
-
     # Secret-looking files present but not accidentally trackable
     gitignore_path = os.path.join(base, ".gitignore")
     sensitive_files = [".env", "credentials.json", "token.json", "devices.json", "data/", "backups/"]
@@ -256,7 +210,6 @@ def run_self_audit() -> dict:
                "Other subprocess call sites (recon/osint tools) use fixed argument-list commands, not shell strings.")
 
     return {
-        "kill_switch": ks,
         "findings": findings,
         "ok": ok,
         "status": "ATTENTION" if findings else "CLEAN",
