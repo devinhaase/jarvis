@@ -1,0 +1,14 @@
+[1mbottle[0m==0.13.4
+[1mcertifi[0m==2026.7.22
+[1mcffi[0m==2.1.1
+[1mcharset-normalizer[0m==3.4.9
+[1mclr-loader[0m==0.3.1
+[1midna[0m==3.18
+[1mpillow[0m==12.3.0
+[1mproxy-tools[0m==0.1.0
+[1mpycparser[0m==3.0
+[1mpythonnet[0m==3.1.0
+[1mpywebview[0m==6.2.1
+[1mrequests[0m==2.34.2
+[1mtyping-extensions[0m==4.16.0
+[1murllib3[0m==2.7.0
