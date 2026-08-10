@@ -3,6 +3,12 @@
 credentials.json
 token.json
 devices.json
+# Phase 8 — any downloaded API key/secret file dropped at the project root before being
+# read into an encrypted data/*.enc store (e.g. OPNsense's own "System > Access > API Keys"
+# download). Real near-miss: an OPNsense key file sat here un-ignored for one session before
+# this pattern was added — caught before a git add ever ran, not after.
+*apikey*.txt
+*api_key*.txt
 
 # Runtime data — conversation history, memory, generated payloads, voice models, backups
 data/

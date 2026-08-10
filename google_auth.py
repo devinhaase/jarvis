@@ -58,28 +58,19 @@ SCOPES = [
 ]
 
 
-def _get_or_create_key() -> bytes:
-    """Reads GOOGLE_TOKEN_ENCRYPTION_KEY from .env, generating and persisting a fresh one
-    on first use — same "generate once, then it's just a secret like any other" pattern
-    device_registry.py's tokens already follow, just for a symmetric encryption key
-    instead of a bearer token."""
-    key = os.getenv("GOOGLE_TOKEN_ENCRYPTION_KEY")
-    if key:
-        return key.encode()
-
-    from cryptography.fernet import Fernet
-    new_key = Fernet.generate_key()
-    env_path = ".env"
-    with open(env_path, "a", encoding="utf-8") as f:
-        f.write(f"\n# Auto-generated (Phase 6 item 4) — encrypts data/google_token.enc\n")
-        f.write(f"GOOGLE_TOKEN_ENCRYPTION_KEY={new_key.decode()}\n")
-    os.environ["GOOGLE_TOKEN_ENCRYPTION_KEY"] = new_key.decode()
-    return new_key
-
-
 def _fernet():
+    # Phase 8: moved to the shared credential_keys.py helper after the exact "duplicate
+    # key" bug documented in .env's own comment history (three GOOGLE_TOKEN_ENCRYPTION_KEY
+    # lines had accumulated from server.py's long-running process racing a separate
+    # short-lived one) hit firewall_opnsense.py and nas_ugreen.py again, independently,
+    # before anyone connected the three incidents — see credential_keys.py's module
+    # docstring for the actual root cause and fix.
     from cryptography.fernet import Fernet
-    return Fernet(_get_or_create_key())
+    from credential_keys import get_or_create_encryption_key
+    key = get_or_create_encryption_key(
+        "GOOGLE_TOKEN_ENCRYPTION_KEY", "encrypts data/google_token.enc"
+    )
+    return Fernet(key)
 
 
 def save_credentials(creds):

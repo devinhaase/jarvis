@@ -52,23 +52,13 @@ REQUEST_TIMEOUT_S = 10
 _session_token = None
 
 
-def _get_or_create_key() -> bytes:
-    key = os.getenv("NAS_UGREEN_TOKEN_ENCRYPTION_KEY")
-    if key:
-        return key.encode()
-
-    from cryptography.fernet import Fernet
-    new_key = Fernet.generate_key()
-    with open(".env", "a", encoding="utf-8") as f:
-        f.write("\n# Auto-generated (Phase 8) — encrypts data/nas_ugreen_credentials.enc\n")
-        f.write(f"NAS_UGREEN_TOKEN_ENCRYPTION_KEY={new_key.decode()}\n")
-    os.environ["NAS_UGREEN_TOKEN_ENCRYPTION_KEY"] = new_key.decode()
-    return new_key
-
-
 def _fernet():
     from cryptography.fernet import Fernet
-    return Fernet(_get_or_create_key())
+    from credential_keys import get_or_create_encryption_key
+    key = get_or_create_encryption_key(
+        "NAS_UGREEN_TOKEN_ENCRYPTION_KEY", "encrypts data/nas_ugreen_credentials.enc"
+    )
+    return Fernet(key)
 
 
 def save_credentials(base_url: str, username: str, password: str):
