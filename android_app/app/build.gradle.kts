@@ -29,10 +29,12 @@ if (hasFirebaseConfig) {
 
 android {
     namespace = "com.dhaaselab.jarvis"
-    // compileSdk/targetSdk 34 — matches the platform actually installed for this build.
-    // Confirm the current Play Console requirement at submission time (Tier 11); bumping
-    // this later is a one-line change plus reinstalling that SDK platform, not a rewrite.
-    compileSdk = 34
+    // compileSdk/targetSdk 35 — bumped from 34 at actual Play Console submission time
+    // (Tier 11), exactly as anticipated in this comment's own earlier version: Play
+    // Console rejected the first upload with "must target at least API level 35."
+    // Confirmed live: platform 35 wasn't installed locally either, installed via
+    // `sdkmanager "platforms;android-35" "build-tools;35.0.0"` before this build.
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.dhaaselab.jarvis"
@@ -41,8 +43,15 @@ android {
         // quirks that would otherwise need their own compatibility shims for zero real
         // benefit on a personal client app.
         minSdk = 26
-        targetSdk = 34
-        versionCode = 1
+        targetSdk = 35
+        // versionCode 1 was consumed by the first (API-34-targeting, rejected) upload
+        // attempt — Play Console permanently reserves a version code the moment a bundle
+        // carrying it is uploaded, even to a draft release that never got published, so
+        // it can never be reused. 2 was the corrected (API 35) build that's now live; 3 is
+        // the WindowInsets/edge-to-edge fix (real bug found on Devin's own S24 Ultra) —
+        // bump server.py's ANDROID_MIN_VERSION_CODE to 3 alongside this (Part 3's own
+        // update-check mechanism) so any device still on 2 sees the update banner.
+        versionCode = 3
         versionName = "1.0"
     }
 

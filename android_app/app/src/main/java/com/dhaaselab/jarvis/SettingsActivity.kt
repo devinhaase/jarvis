@@ -5,6 +5,8 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 
@@ -19,6 +21,15 @@ class SettingsActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
+
+        // Same targetSdk-35-mandatory-edge-to-edge fix as MainActivity — see that file's
+        // own comment for the full story. This screen's Save button sits at the bottom of
+        // a ScrollView, exactly where a phone's gesture nav bar would otherwise cover it.
+        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.settingsRootLayout)) { view, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
+            insets
+        }
 
         val connectedViaText: TextView = findViewById(R.id.connectedViaText)
         val computerNameInput: EditText = findViewById(R.id.computerNameInput)

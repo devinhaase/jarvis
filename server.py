@@ -1431,7 +1431,7 @@ async def health():
 # string it displays as-is; Android's versionCode is always an int, matching how Google
 # Play itself tracks version ordering).
 DESKTOP_MIN_VERSION = "1.0.0"
-ANDROID_MIN_VERSION_CODE = 1
+ANDROID_MIN_VERSION_CODE = 3
 
 
 @app.get("/native-shell-version")

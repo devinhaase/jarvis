@@ -22,6 +22,8 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -76,6 +78,23 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        // Real bug hit on a physical device (Samsung S24 Ultra) after bumping targetSdk to
+        // 35 for Play Console's submission requirement: Android 15+ makes edge-to-edge
+        // display mandatory once an app targets API 35 — content that used to sit safely
+        // below the status bar and above the gesture nav bar now draws underneath both by
+        // default. Nothing here opts back into the old letterboxed behavior (targetSdk 35
+        // doesn't allow that); instead this pads the root layout by the actual system bar
+        // insets, so the WebView's own content (its header, its composer's fixed-bottom
+        // bar) renders inside the safe area instead of behind the phone's own status
+        // bar/notification icons or its gesture bar. Applied to the root FrameLayout, not
+        // the WebView directly, so the floating settings button and the status/error
+        // overlay both get the same safe-area treatment for free.
+        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.rootLayout)) { view, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
+            insets
+        }
 
         webView = findViewById(R.id.webView)
         statusOverlay = findViewById(R.id.statusOverlay)
