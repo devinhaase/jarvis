@@ -647,7 +647,13 @@ a.text-btn { display: inline-block; text-decoration: none; }
   margin-top: 6px;
 }
 
-/* Phase 6 item 5 — integration connection-status strip (Obsidian/Gmail/Calendar/Drive) */
+/* Phase 6 item 5 — integration connection-status strip (Obsidian/Gmail/Calendar/Drive),
+   extended in Phase 8 section 6 with Twingate/Firewall/NAS and a real 5-state model
+   (data-state, not a single binary class) applied consistently across all 7 dots — a
+   "consistency pass" that left the original 4 on the old binary look while only the 3 new
+   ones got real states would defeat the point. Each state gets a genuinely distinct
+   treatment (color + motion, not just opacity) so the difference reads at a glance rather
+   than needing the tooltip. */
 .integration-status-panel {
   display: flex;
   gap: 10px;
@@ -656,14 +662,59 @@ a.text-btn { display: inline-block; text-decoration: none; }
   font-size: 13px;
 }
 .integration-dot {
-  opacity: 0.35;
-  filter: grayscale(1);
+  position: relative;
   cursor: default;
-  transition: opacity 0.15s ease;
+  transition: opacity 0.15s ease, filter 0.15s ease;
 }
-.integration-dot.connected {
+
+/* loading — the one state the server never actually sends; what every dot shows from page
+   load until the first real status message arrives. */
+.integration-dot[data-state="loading"] {
+  opacity: 0.45;
+  filter: grayscale(1);
+  animation: pulse 1.6s infinite ease-in-out;
+}
+
+/* connected — fully working, full color, no motion (a steady state shouldn't draw the eye). */
+.integration-dot[data-state="connected"] {
   opacity: 1;
   filter: none;
+}
+
+/* degraded — partially working (e.g. Google connected but this scope isn't granted; NAS
+   configured but Twingate isn't up right now) — visible but clearly not "all good," a slow
+   amber pulse rather than the urgent loading pulse. */
+.integration-dot[data-state="degraded"] {
+  opacity: 0.85;
+  filter: sepia(1) saturate(3) hue-rotate(-10deg);
+  animation: pulse 2.4s infinite ease-in-out;
+}
+
+/* disconnected — nothing configured/nothing to connect to. Dim and static, deliberately
+   the least visually alarming state (this is often just "not set up yet," not a problem). */
+.integration-dot[data-state="disconnected"] {
+  opacity: 0.3;
+  filter: grayscale(1);
+}
+
+/* error — the check itself failed (an exception, not a clean "not reachable") — distinct
+   from disconnected because this means something's actually wrong with the check, not
+   just "nothing to connect to." A small red corner mark makes this readable even for
+   someone who can't rely on the sepia/grayscale color distinction alone. */
+.integration-dot[data-state="error"] {
+  opacity: 0.85;
+  filter: grayscale(0.6);
+}
+.integration-dot[data-state="error"]::after {
+  content: "";
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #e5484d;
+  border: 1px solid var(--bg);
 }
 
 /* Pending-skill count badge on the Skills button — visible without opening the modal. */

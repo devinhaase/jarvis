@@ -521,6 +521,78 @@ try:
 except Exception as _synth_err:
     pass  # Hacking synthesis tools unavailable — Jarvis continues without them
 
+# --- Twingate fail-closed gate (Phase 8, section 5) — the status check + override toggle
+# every firewall/NAS tool below is gated behind. get_twingate_status is Tier 1 (read-only
+# visibility); the two toggle tools are Tier 3 per Devin's own spec ("explicit, logged,
+# Tier-3 toggle... never a silent fallback") — notify-then-act, not instant, for both
+# directions, so re-enabling protection gets the same visible moment disabling it does.
+try:
+    from twingate_status import (
+        twingate_status, disable_twingate_requirement, enable_twingate_requirement,
+    )
+
+    twingate_reg = {
+        "get_twingate_status": Tool("get_twingate_status", "Check whether the Twingate client is installed and connected right now — the gate every firewall/NAS action is refused behind if this is False", Tier.TIER_1, twingate_status, team="it"),
+        "disable_twingate_requirement": Tool("disable_twingate_requirement", "Temporarily allow firewall/NAS actions to proceed without a live Twingate connection (e.g. known flakiness while traveling) — requires a reason, auto-expires (default 60min, max 24h), logged every time", Tier.TIER_3, disable_twingate_requirement, team="it"),
+        "enable_twingate_requirement": Tool("enable_twingate_requirement", "Re-enable the Twingate connectivity requirement immediately, before its natural expiry", Tier.TIER_3, enable_twingate_requirement, team="it"),
+    }
+    ALL_TOOLS = {**ALL_TOOLS, **twingate_reg}
+except Exception as _tg_err:
+    pass  # Twingate status tools unavailable — Jarvis continues without them
+
+# --- OPNsense firewall (Phase 8, section 1) — every read tool is gated behind
+# require_twingate_or_refuse() inside firewall_tools.py itself, not here; every
+# rule-mutating tool is Tier 4 with role="offense" per Devin's own "every time, no
+# exceptions" instruction (a misconfiguration here can lock him out of his own network).
+try:
+    from firewall_tools import (
+        save_opnsense_credentials, get_connected_devices, get_bandwidth_usage,
+        get_active_connections, get_firewall_uptime, get_firewall_logs,
+        get_firewall_traffic_patterns, add_firewall_rule, remove_firewall_rule, toggle_port,
+    )
+
+    firewall_reg = {
+        "save_opnsense_credentials": Tool("save_opnsense_credentials", "Save OPNsense API credentials (base_url, api_key, api_secret from OPNsense's System -> Access -> API Keys) — encrypted at rest, same as the Google tokens", Tier.TIER_2, save_opnsense_credentials, team="network"),
+        "get_connected_devices": Tool("get_connected_devices", "Read the firewall's live ARP table — every device currently seen on the network", Tier.TIER_1, get_connected_devices, team="network"),
+        "get_bandwidth_usage": Tool("get_bandwidth_usage", "Read per-interface bandwidth counters from the firewall", Tier.TIER_1, get_bandwidth_usage, team="network"),
+        "get_active_connections": Tool("get_active_connections", "Read the firewall's current active-connection state table", Tier.TIER_1, get_active_connections, team="network"),
+        "get_firewall_uptime": Tool("get_firewall_uptime", "Read the firewall's own reported uptime/system status", Tier.TIER_1, get_firewall_uptime, team="network"),
+        "get_firewall_logs": Tool("get_firewall_logs", "Read recent firewall filter logs for anomaly detection", Tier.TIER_1, get_firewall_logs, team="cybersecurity"),
+        "get_firewall_traffic_patterns": Tool("get_firewall_traffic_patterns", "Read a combined traffic-pattern snapshot (interface stats + active connections) for anomaly analysis", Tier.TIER_1, get_firewall_traffic_patterns, team="cybersecurity"),
+        "add_firewall_rule": Tool("add_firewall_rule", "Add and apply ONE firewall rule — requires explicit confirmation every single call, no exceptions (a misconfiguration here can lock Devin out of his own network)", Tier.TIER_4, add_firewall_rule, role="offense", team="network"),
+        "remove_firewall_rule": Tool("remove_firewall_rule", "Remove and apply removal of one firewall rule by its uuid — requires explicit confirmation every single call", Tier.TIER_4, remove_firewall_rule, role="offense", team="network"),
+        "toggle_port": Tool("toggle_port", "Enable or disable one existing firewall rule by its uuid (opens/closes a port without deleting the rule) — requires explicit confirmation every single call", Tier.TIER_4, toggle_port, role="offense", team="network"),
+    }
+    ALL_TOOLS = {**ALL_TOOLS, **firewall_reg}
+except Exception as _fw_err:
+    pass  # OPNsense firewall tools unavailable — Jarvis continues without them
+
+# --- UGREEN NAS (Phase 8, section 2) — same Twingate-gated, credential-configured pattern
+# as the firewall tools above, owned by the IT team (matches IT's existing ownership of
+# backups/local file operations/scheduled maintenance).
+try:
+    from nas_tools import (
+        save_nas_credentials, get_nas_storage_health, get_nas_capacity,
+        get_nas_backup_status, get_nas_running_services, create_nas_backup, read_nas_file,
+        delete_nas_file, update_nas_config, modify_nas_share_permissions,
+    )
+
+    nas_reg = {
+        "save_nas_credentials": Tool("save_nas_credentials", "Save NAS login credentials (base_url, username, password) — encrypted at rest, same as the Google tokens", Tier.TIER_2, save_nas_credentials, team="it"),
+        "get_nas_storage_health": Tool("get_nas_storage_health", "Read disk-level health from the NAS's storage subsystem", Tier.TIER_1, get_nas_storage_health, team="it"),
+        "get_nas_capacity": Tool("get_nas_capacity", "Read storage pool capacity/usage from the NAS", Tier.TIER_1, get_nas_capacity, team="it"),
+        "get_nas_backup_status": Tool("get_nas_backup_status", "Read recent/scheduled backup task status from the NAS", Tier.TIER_1, get_nas_backup_status, team="it"),
+        "get_nas_running_services": Tool("get_nas_running_services", "Read what's currently running on the NAS", Tier.TIER_1, get_nas_running_services, team="it"),
+        "create_nas_backup": Tool("create_nas_backup", "Trigger a one-off backup job on the NAS for a given path — reversible/logged, doesn't overwrite or remove anything", Tier.TIER_2, create_nas_backup, team="it"),
+        "read_nas_file": Tool("read_nas_file", "Read a file's actual content from the NAS (not just metadata)", Tier.TIER_2, read_nas_file, team="it"),
+        "delete_nas_file": Tool("delete_nas_file", "Delete one file/path on the NAS — requires explicit confirmation every single call", Tier.TIER_4, delete_nas_file, role="offense", team="it"),
+        "update_nas_config": Tool("update_nas_config", "Change one NAS-level config setting — requires explicit confirmation every single call", Tier.TIER_4, update_nas_config, role="offense", team="it"),
+        "modify_nas_share_permissions": Tool("modify_nas_share_permissions", "Change one user's permission level on one shared folder — requires explicit confirmation every single call", Tier.TIER_4, modify_nas_share_permissions, role="offense", team="it"),
+    }
+    ALL_TOOLS = {**ALL_TOOLS, **nas_reg}
+except Exception as _nas_err:
+    pass  # NAS tools unavailable — Jarvis continues without them
+
 # ---------------------------------------------------------------------------
 # CAPABILITY REQUIREMENTS (multi-device routing)
 # ---------------------------------------------------------------------------
@@ -582,4 +654,31 @@ REQUIRES_CAPABILITY = {
     "bandwidth_sample": "filesystem",       # psutil reads the server host's own interfaces
     "check_wan_status": "filesystem",       # SSDP multicast from the server host
     "diagnose_connectivity": "filesystem",  # composes the above
+    # Twingate gate (Phase 8) — shells out to the twingate CLI on the server host.
+    "get_twingate_status": "filesystem",
+    "disable_twingate_requirement": "filesystem",
+    "enable_twingate_requirement": "filesystem",
+    # OPNsense firewall (Phase 8) — reads/writes the server host's own encrypted
+    # credential file and makes outbound API calls from wherever the server host is.
+    "save_opnsense_credentials": "filesystem",
+    "get_connected_devices": "filesystem",
+    "get_bandwidth_usage": "filesystem",
+    "get_active_connections": "filesystem",
+    "get_firewall_uptime": "filesystem",
+    "get_firewall_logs": "filesystem",
+    "get_firewall_traffic_patterns": "filesystem",
+    "add_firewall_rule": "filesystem",
+    "remove_firewall_rule": "filesystem",
+    "toggle_port": "filesystem",
+    # UGREEN NAS (Phase 8) — same reasoning as the OPNsense entries above.
+    "save_nas_credentials": "filesystem",
+    "get_nas_storage_health": "filesystem",
+    "get_nas_capacity": "filesystem",
+    "get_nas_backup_status": "filesystem",
+    "get_nas_running_services": "filesystem",
+    "create_nas_backup": "filesystem",
+    "read_nas_file": "filesystem",
+    "delete_nas_file": "filesystem",
+    "update_nas_config": "filesystem",
+    "modify_nas_share_permissions": "filesystem",
 }

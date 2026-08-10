@@ -67,8 +67,17 @@ VAPID_CONTACT_EMAIL = os.getenv("JARVIS_VAPID_CONTACT_EMAIL", "mailto:devinhaase
 FCM_SERVICE_ACCOUNT_FILE = os.path.join("data", "firebase-service-account.json")
 FCM_SEND_URL_TEMPLATE = "https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
 
-CATEGORIES = ("approvals", "alerts", "briefing", "messages")
-DEFAULT_CATEGORIES = {"approvals": True, "alerts": True, "briefing": True, "messages": False}
+CATEGORIES = (
+    "approvals", "alerts", "briefing", "messages",
+    # Phase 8, section 3 — network_monitor.py's four distinct finding categories, kept
+    # separate from "alerts" (posture_monitor.py's own category) so a device can toggle
+    # network-specific notifications independently of general security-posture ones.
+    "network_anomaly", "new_device", "failed_logins", "backup_failure",
+)
+DEFAULT_CATEGORIES = {
+    "approvals": True, "alerts": True, "briefing": True, "messages": False,
+    "network_anomaly": True, "new_device": True, "failed_logins": True, "backup_failure": True,
+}
 DEFAULT_QUIET_HOURS = {"enabled": False, "start": "22:00", "end": "07:00"}
 
 

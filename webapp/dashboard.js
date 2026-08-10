@@ -333,16 +333,30 @@ function renderCrossTeamLog(incidents) {
   }
 }
 
+// Phase 8 section 6 — server.py's _integration_status() now returns a 5-state string per
+// key ("connected"/"degraded"/"disconnected"/"error"), not a boolean; this used to just
+// truthy-check the value, which would have silently shown every non-empty state string
+// (including "disconnected") as "ok" — real bug caught before it shipped, not live. Maps
+// each state to the same ok/warn/off vocabulary this dashboard's health chips already use.
+function _healthChipClass(state) {
+  if (state === "connected") return "ok";
+  if (state === "degraded" || state === "error") return "warn";
+  return "off";  // disconnected, or an unrecognized value — never silently "ok"
+}
+
 function renderSystemHealth(integration, vpn) {
   els.systemHealthStrip.innerHTML = "";
   const items = [
     ["Obsidian", integration.obsidian], ["Gmail", integration.gmail],
     ["Calendar", integration.calendar], ["Drive", integration.drive],
+    ["Twingate", integration.twingate], ["Firewall", integration.firewall],
+    ["NAS", integration.nas],
   ];
-  for (const [label, ok] of items) {
+  for (const [label, state] of items) {
+    const cls = _healthChipClass(state);
     const chip = document.createElement("span");
-    chip.className = "health-chip " + (ok ? "ok" : "warn");
-    chip.textContent = `${ok ? "●" : "○"} ${label}`;
+    chip.className = "health-chip " + cls;
+    chip.textContent = `${cls === "ok" ? "●" : "○"} ${label}`;
     els.systemHealthStrip.appendChild(chip);
   }
   if (vpn && vpn.detected) {

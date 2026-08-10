@@ -86,3 +86,25 @@ per-call approval is already back in effect the moment the process is running.
   design (only the WebSocket handshake enforces device tokens) — a known, pre-existing scope
   boundary from Phase 3/4, not something this pass changed. Worth closing in a future pass if
   this server is ever exposed beyond a trusted LAN.
+
+## `authorized_targets.json` already supports network ranges (Phase 8)
+
+Worth stating plainly since it's easy to assume otherwise: the Hacking team's
+`data/authorized_targets.json` has supported CIDR ranges in its `"networks"` field since
+before Phase 8 — `auth_check.py`'s `AuthorizationCheck.is_authorized()` checks any IP-literal
+target against every CIDR string there via `ipaddress.ip_network(...)` membership, and
+Devin's home `/24` (`192.168.1.0/24`) is already listed. This means "authorize a whole
+segment, not just individual hosts" was never something that needed building for Phase 8's
+expanded firewall/NAS-testing tooling — it's the same mechanism every offense tool already
+checks against, unchanged. Two things this does NOT do, on purpose, matching every other
+authorization boundary in this project: it only matches IP-literal targets (a bare hostname
+still needs an exact entry in `"hosts"`/`"domains"`), and it's never edited by Jarvis itself
+— adding a new range is always Devin's own explicit edit to the file, never inferred from a
+conversation.
+
+Feeding firewall/NAS testing techniques into the Hacking team's reference library
+(`add_reference_material`) and drafting a tool from that material
+(`synthesize_tool_from_reference`) also needed no new code for the same reason — both were
+already generic (any goal + any reference content, not hacking-specific in mechanism), and
+`synthesize_tool_from_reference` still only ever writes a file and proposes a skill
+(status `"proposed"`, never auto-active) — Phase 5's review gate applies exactly as before.

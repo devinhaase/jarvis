@@ -43,10 +43,13 @@
     <div id="convList" class="conv-list"></div>
 
     <div id="integrationStatusPanel" class="integration-status-panel">
-      <span class="integration-dot" id="statusDotObsidian" title="Obsidian vault">🗒</span>
-      <span class="integration-dot" id="statusDotGmail" title="Gmail">✉</span>
-      <span class="integration-dot" id="statusDotCalendar" title="Calendar">📅</span>
-      <span class="integration-dot" id="statusDotDrive" title="Drive">📁</span>
+      <span class="integration-dot" id="statusDotObsidian" data-state="loading" title="Obsidian vault: checking…">🗒</span>
+      <span class="integration-dot" id="statusDotGmail" data-state="loading" title="Gmail: checking…">✉</span>
+      <span class="integration-dot" id="statusDotCalendar" data-state="loading" title="Calendar: checking…">📅</span>
+      <span class="integration-dot" id="statusDotDrive" data-state="loading" title="Drive: checking…">📁</span>
+      <span class="integration-dot" id="statusDotTwingate" data-state="loading" title="Twingate: checking…">🔒</span>
+      <span class="integration-dot" id="statusDotFirewall" data-state="loading" title="Firewall: checking…">🧱</span>
+      <span class="integration-dot" id="statusDotNas" data-state="loading" title="NAS: checking…">💾</span>
     </div>
 
     <div class="sidebar-footer">
@@ -140,6 +143,10 @@
           <label class="push-toggle-row"><input type="checkbox" id="pushCatAlerts"><span>Alerts — security posture changes</span></label>
           <label class="push-toggle-row"><input type="checkbox" id="pushCatBriefing"><span>Daily briefing</span></label>
           <label class="push-toggle-row"><input type="checkbox" id="pushCatMessages"><span>Every reply (can be noisy)</span></label>
+          <label class="push-toggle-row"><input type="checkbox" id="pushCatNetworkAnomaly"><span>Anomalous network traffic</span></label>
+          <label class="push-toggle-row"><input type="checkbox" id="pushCatNewDevice"><span>New/unknown device joins the network</span></label>
+          <label class="push-toggle-row"><input type="checkbox" id="pushCatFailedLogins"><span>Repeated failed logins (firewall/NAS)</span></label>
+          <label class="push-toggle-row"><input type="checkbox" id="pushCatBackupFailure"><span>NAS backup failures</span></label>
           <div class="tool-group-title">Quiet hours</div>
           <label class="push-toggle-row"><input type="checkbox" id="pushQuietEnabled"><span>Enabled (Tier-4 confirmations still come through)</span></label>
           <div class="push-quiet-times">

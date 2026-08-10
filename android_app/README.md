@@ -129,6 +129,26 @@ written above. Reverted `ANDROID_MIN_VERSION_CODE` back to `1`, restarted the se
 force-stopped and relaunched the app fresh, and confirmed the banner element is absent
 (`document.getElementById(...)` returns `null`) on a normal, up-to-date launch.
 
+## The brain travels now (Phase 8) — what changed and what didn't
+
+The machine running `server.py` — "the main computer" this whole app connects to — now
+travels with Devin (college), not fixed at the home address `192.168.1.147` was originally
+chosen for. Confirmed directly, not assumed: `ConnectionPrefs.kt`'s
+`DEFAULT_VPN_ADDRESS` (`ai.dhaaselab.com`) and `DEFAULT_LOCAL_ADDRESS`
+(`192.168.1.147:8765`) both point at the same physical machine.
+
+**Nothing here needed to change.** `ConnectionManager.kt`'s existing local → Wake-on-LAN
+retry → VPN fallback chain already degrades gracefully: once the laptop is off the home
+LAN, the local address simply times out and the app falls through to the VPN path
+(`ai.dhaaselab.com`), which works identically regardless of where the laptop physically is.
+
+**Wake-on-LAN of the brain is now vestigial** — you can't WOL a laptop that isn't on the
+LAN you're broadcasting the magic packet from, and the laptop is usually not on that LAN
+anymore. This is expected, not a regression: the WOL code stays in place for the
+"actually home this week" case, and the app just never gets to use it the rest of the
+time, falling straight through to VPN instead. If Devin's phone and the brain are ever on
+the *same* Wi-Fi again (visiting home), WOL/local behave exactly as originally designed.
+
 ## Known, deliberate scope boundaries
 
 - **Mic only works over the VPN connection, not the local/LAN one.** Real finding from

@@ -189,14 +189,16 @@ after_file = coord_module.console.file
 check("coordinator.console.file is restored after the context manager exits", after_file is before_file)
 
 # ---------------------------------------------------------------------------
-section("8. Interactive menu — Teams/Skills options added, numbering consistent 1-10")
+section("8. Interactive menu — Teams/Skills/Network status options, numbering consistent 1-11")
 # ---------------------------------------------------------------------------
 
 src = inspect.getsource(main_module)
-check("menu choices now run 1-10 (Teams/Skills inserted before Action Logs/Exit)",
-      "range(1, 11)" in src)
+check("menu choices now run 1-11 (Teams/Skills/Network status inserted before Exit)",
+      "range(1, 12)" in src)
 check("choice '7' renders a Teams table sourced from teams.TEAMS", "from teams import TEAMS" in src)
 check("choice '8' renders the skill review queue sourced from skills.list_skills", "skills.list_skills()" in src)
+check("choice '10' renders network infrastructure status sourced from _compute_integration_status",
+      "_compute_integration_status" in src)
 
 print(f"\n{'=' * 55}\n{PASS} passed, {FAIL} failed\n{'=' * 55}")
 sys.exit(1 if FAIL else 0)

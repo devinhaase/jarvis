@@ -20,6 +20,10 @@ const els = {
   pushCatAlerts: $("#pushCatAlerts"),
   pushCatBriefing: $("#pushCatBriefing"),
   pushCatMessages: $("#pushCatMessages"),
+  pushCatNetworkAnomaly: $("#pushCatNetworkAnomaly"),
+  pushCatNewDevice: $("#pushCatNewDevice"),
+  pushCatFailedLogins: $("#pushCatFailedLogins"),
+  pushCatBackupFailure: $("#pushCatBackupFailure"),
   pushQuietEnabled: $("#pushQuietEnabled"),
   pushQuietStart: $("#pushQuietStart"),
   pushQuietEnd: $("#pushQuietEnd"),
@@ -254,6 +258,7 @@ function handleServerMessage(msg) {
       break;
 
     case "integration_status":
+    case "integration_status_changed":
       renderIntegrationStatus(msg);
       break;
 
@@ -707,23 +712,41 @@ function renderTeamsModal(teamList) {
 }
 
 // ---------------------------------------------------------------------------
-// Integration status panel (Phase 6 item 5) — 4 dots in the sidebar footer showing
-// whether Obsidian/Gmail/Calendar/Drive are actually reachable right now. Fetched once
-// on "ready" (see handleServerMessage) rather than polled — these are slow-changing
-// (you connect Google once, then it's connected for weeks), so there's no live-update
-// path here; reconnecting the websocket (e.g. server restart) re-fetches it for free.
+// Integration status panel (Phase 6 item 5, made live + 5-state in Phase 8 section 6) —
+// 7 dots in the sidebar footer: Obsidian/Gmail/Calendar/Drive (Phase 6) plus
+// Twingate/Firewall/NAS (Phase 8). Each dot's data-state is one of "connected" |
+// "degraded" | "disconnected" | "error" | "loading" — "loading" is the one state the
+// server never sends (see server.py's STATE_* constants); it's just what every dot shows
+// from page load until the first real integration_status/integration_status_changed
+// message arrives, so the panel never silently shows stale/wrong info in the gap.
+// Fetched once on "ready" (see handleServerMessage) AND kept live afterward — the server
+// now runs a background check loop and broadcasts integration_status_changed only when a
+// state actually flips, so Firewall/NAS/Twingate (genuinely variable now that the brain
+// travels — see task.md's Phase 8 entry) update without needing a page reload.
 // ---------------------------------------------------------------------------
+
+const INTEGRATION_STATE_LABEL = {
+  connected: "connected", degraded: "degraded — partially working", disconnected: "not connected",
+  error: "error checking status", loading: "checking…",
+};
+const INTEGRATION_DOT_TITLE = {
+  statusDotObsidian: "Obsidian vault", statusDotGmail: "Gmail", statusDotCalendar: "Calendar",
+  statusDotDrive: "Drive", statusDotTwingate: "Twingate", statusDotFirewall: "Firewall",
+  statusDotNas: "NAS",
+};
 
 function renderIntegrationStatus(status) {
   const dots = {
-    statusDotObsidian: status.obsidian,
-    statusDotGmail: status.gmail,
-    statusDotCalendar: status.calendar,
-    statusDotDrive: status.drive,
+    statusDotObsidian: status.obsidian, statusDotGmail: status.gmail,
+    statusDotCalendar: status.calendar, statusDotDrive: status.drive,
+    statusDotTwingate: status.twingate, statusDotFirewall: status.firewall,
+    statusDotNas: status.nas,
   };
-  for (const [id, connected] of Object.entries(dots)) {
+  for (const [id, state] of Object.entries(dots)) {
     const el = document.getElementById(id);
-    if (el) el.classList.toggle("connected", !!connected);
+    if (!el || !state) continue;  // undefined = this dot's key wasn't in the payload; leave it alone
+    el.dataset.state = state;
+    el.title = `${INTEGRATION_DOT_TITLE[id]}: ${INTEGRATION_STATE_LABEL[state] || state}`;
   }
 }
 
@@ -748,6 +771,10 @@ function renderPushSettings(settings) {
   els.pushCatAlerts.checked = cats.alerts !== false;
   els.pushCatBriefing.checked = cats.briefing !== false;
   els.pushCatMessages.checked = !!cats.messages;
+  els.pushCatNetworkAnomaly.checked = cats.network_anomaly !== false;
+  els.pushCatNewDevice.checked = cats.new_device !== false;
+  els.pushCatFailedLogins.checked = cats.failed_logins !== false;
+  els.pushCatBackupFailure.checked = cats.backup_failure !== false;
   const qh = settings.quiet_hours || {};
   els.pushQuietEnabled.checked = !!qh.enabled;
   els.pushQuietStart.value = qh.start || "22:00";
@@ -773,10 +800,17 @@ function _sendCategoryUpdate() {
       alerts: els.pushCatAlerts.checked,
       briefing: els.pushCatBriefing.checked,
       messages: els.pushCatMessages.checked,
+      network_anomaly: els.pushCatNetworkAnomaly.checked,
+      new_device: els.pushCatNewDevice.checked,
+      failed_logins: els.pushCatFailedLogins.checked,
+      backup_failure: els.pushCatBackupFailure.checked,
     },
   });
 }
-for (const el of [els.pushCatApprovals, els.pushCatAlerts, els.pushCatBriefing, els.pushCatMessages]) {
+for (const el of [
+  els.pushCatApprovals, els.pushCatAlerts, els.pushCatBriefing, els.pushCatMessages,
+  els.pushCatNetworkAnomaly, els.pushCatNewDevice, els.pushCatFailedLogins, els.pushCatBackupFailure,
+]) {
   el.addEventListener("change", _sendCategoryUpdate);
 }
 

@@ -6,6 +6,13 @@ it's asleep and just works when you click it. See `task.md`'s entries for the fu
 tier-by-tier build writeup and every real bug hit along the way. This file is the quick
 reference: what's here, how to rebuild, how to troubleshoot.
 
+**The brain travels now (Phase 8).** This app loads `http://localhost:8765/` — always the
+same machine `server.py` runs on, wherever that machine physically is. Nothing about this
+app changes when the laptop travels; it never depended on being on any particular network,
+only on being co-located with the server process itself. The Android app's "main computer"
+Wake-on-LAN/local-network story is the one that actually shifted with the travel topology
+— see `android_app/README.md`'s own note on that.
+
 ## Files
 
 | File | What it does |

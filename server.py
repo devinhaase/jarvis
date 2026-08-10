@@ -201,6 +201,15 @@ async def _lifespan(_app: FastAPI):
     except Exception as e:
         print(f"[Server] Deep reflection loop not started: {e}")
 
+    network_monitor_task = None
+    try:
+        from network_monitor import network_monitor_loop
+        network_monitor_task = asyncio.create_task(network_monitor_loop(broadcast_all=_broadcast_all))
+    except Exception as e:
+        print(f"[Server] Network baseline monitor not started: {e}")
+
+    integration_status_task = asyncio.create_task(_integration_status_cache_loop(broadcast_all=_broadcast_all))
+
     yield
 
     if monitor_task:
@@ -211,6 +220,9 @@ async def _lifespan(_app: FastAPI):
         team_board_task.cancel()
     if deep_reflection_task:
         deep_reflection_task.cancel()
+    if network_monitor_task:
+        network_monitor_task.cancel()
+    integration_status_task.cancel()
 
 
 app = FastAPI(title="Jarvis Server", lifespan=_lifespan)
@@ -400,13 +412,31 @@ def _team_catalog() -> list:
     ]
 
 
-def _integration_status() -> dict:
-    """Phase 6 item 5: the GUI's 4 connection dots (Obsidian/Gmail/Calendar/Drive). Cheap,
-    read-only checks only — a directory-exists check for Obsidian, the same encrypted-token
-    connection_status() google_tools.py/tools.py already use for Google, so this never opens
-    a new network connection or triggers an OAuth flow on its own."""
+# Phase 8, section 6 — 5-state model for every dot in the GUI's integration panel, applied
+# consistently to all 7 (Obsidian/Gmail/Calendar/Drive too, not just the 3 new ones) rather
+# than leaving the old 4 on a binary connected/not-connected class while only the new 3 get
+# real states — a "consistency pass" that left the pre-existing dots inconsistent would be
+# a strange one. "loading" is deliberately NOT one of the values the server ever sends —
+# it's what the client shows before the very first status message of a page load arrives;
+# the server only ever reports a state once it's actually finished checking something.
+STATE_CONNECTED = "connected"
+STATE_DEGRADED = "degraded"
+STATE_DISCONNECTED = "disconnected"
+STATE_ERROR = "error"
+
+# Populated by _integration_status_cache_loop (registered in _lifespan below) — every
+# consumer (get_integration_status's WS handler, _overseer_snapshot()) reads this cache
+# rather than recomputing live, because computing it live now means real network calls
+# (OPNsense/UGOS reachability, a Twingate CLI shell-out) that are fine as a periodic
+# background cost but not something every page load/dashboard refresh should pay for.
+_integration_status_cache: dict = {}
+
+
+def _compute_integration_status() -> dict:
+    """The actual (now non-trivial) check — only ever called from the background loop, or
+    as a cold-start fallback if something asks before the loop's first tick has landed."""
     import obsidian_tools
-    obsidian_connected = os.path.isdir(obsidian_tools._vault_root())
+    obsidian_state = STATE_CONNECTED if os.path.isdir(obsidian_tools._vault_root()) else STATE_DISCONNECTED
 
     try:
         import google_auth
@@ -414,12 +444,85 @@ def _integration_status() -> dict:
     except Exception:
         g = {"connected": False, "gmail": False, "gmail_compose": False, "calendar": False, "drive": False}
 
+    def _google_field_state(field):
+        if not g.get("connected"):
+            return STATE_DISCONNECTED
+        # The token as a whole is valid, just missing this particular scope — "degraded"
+        # (partially working), not "disconnected" (nothing works), matches what's actually
+        # true: Devin authorized *something*, just not this specific capability.
+        return STATE_CONNECTED if g.get(field) else STATE_DEGRADED
+
+    try:
+        import twingate_status as _tg
+        tg = _tg.twingate_status()
+        if tg.get("connected"):
+            twingate_state = STATE_CONNECTED
+        elif tg.get("detected"):
+            twingate_state = STATE_DEGRADED  # client installed, just not connected right now
+        else:
+            twingate_state = STATE_DISCONNECTED  # not installed at all
+    except Exception:
+        twingate_state = STATE_ERROR
+
+    def _home_infra_state(module):
+        try:
+            status = module.connection_status()
+            if not status.get("configured"):
+                return STATE_DISCONNECTED
+            if twingate_state != STATE_CONNECTED:
+                # Configured and ready, just blocked by the Twingate gate right now — this
+                # is exactly "degraded," not "disconnected": credentials are fine, there's
+                # just no protected path to use them over at this moment (very possibly
+                # true a lot of the time now that the brain travels — see task.md's Phase 8
+                # entry — so this is an expected, not alarming, everyday state).
+                return STATE_DEGRADED
+            return STATE_CONNECTED if module.is_reachable() else STATE_DEGRADED
+        except Exception:
+            return STATE_ERROR
+
+    import firewall_opnsense
+    import nas_ugreen
+
     return {
-        "obsidian": obsidian_connected,
-        "gmail": bool(g.get("gmail")),
-        "calendar": bool(g.get("calendar")),
-        "drive": bool(g.get("drive")),
+        "obsidian": obsidian_state,
+        "gmail": _google_field_state("gmail"),
+        "calendar": _google_field_state("calendar"),
+        "drive": _google_field_state("drive"),
+        "twingate": twingate_state,
+        "firewall": _home_infra_state(firewall_opnsense),
+        "nas": _home_infra_state(nas_ugreen),
     }
+
+
+def _integration_status() -> dict:
+    """What every consumer actually calls — serves the cache (see
+    _integration_status_cache_loop) so a page load / dashboard refresh never pays for a
+    live network round-trip to OPNsense/UGOS/Twingate. Falls back to computing fresh only
+    on a genuine cold start, before the background loop's first tick has landed."""
+    return dict(_integration_status_cache) if _integration_status_cache else _compute_integration_status()
+
+
+async def _integration_status_cache_loop(broadcast_all=None, interval_seconds: int = 30):
+    """Phase 8, section 6 — the "live" half of the status panel Devin asked for: checks
+    Twingate/OPNsense/UGOS (plus Obsidian/Google, cheap either way) on a short interval,
+    and broadcasts integration_status_changed to every connected client only when
+    something actually changed — not on every tick, so a steady "connected" state doesn't
+    spam the GUI with redundant re-renders. Same background-loop-in-server.py's-lifespan
+    shape every other periodic task here already uses (posture_monitor_loop,
+    network_monitor_loop, etc.)."""
+    global _integration_status_cache
+    while True:
+        try:
+            new_status = await asyncio.to_thread(_compute_integration_status)
+            if new_status != _integration_status_cache:
+                _integration_status_cache = new_status
+                if broadcast_all:
+                    await broadcast_all({"type": "integration_status_changed", **new_status})
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            print(f"[IntegrationStatus] check failed: {e}")
+        await asyncio.sleep(interval_seconds)
 
 
 def _tailscale_status() -> dict:

@@ -157,8 +157,10 @@ def display_menu():
     table.add_row("", "8", "View skill review queue (mirrors the web GUI's Skills panel)")
     table.add_row("[dim]── Memory ──[/dim]", "", "")
     table.add_row("", "9", "View recent Action Logs")
+    table.add_row("[dim]── Home Network (Phase 8) ──[/dim]", "", "")
+    table.add_row("", "10", "Network infrastructure status (Firewall/NAS/Twingate)")
     table.add_row("[dim]── System ──[/dim]", "", "")
-    table.add_row("", "10", "Exit")
+    table.add_row("", "11", "Exit")
 
     console.print(Panel(table, title="[bold]Welcome, Devin.[/bold]", border_style="magenta"))
 
@@ -508,7 +510,7 @@ def main():
         print_banner()
         display_menu()
 
-        choice = Prompt.ask("\nSelect an option", choices=[str(n) for n in range(1, 11)], default="6")
+        choice = Prompt.ask("\nSelect an option", choices=[str(n) for n in range(1, 12)], default="6")
 
         if choice == '1':
             console.print(Panel("[bold cyan]Goal:[/bold cyan] Check recent emails", title="🤖 Jarvis", border_style="cyan"))
@@ -599,6 +601,23 @@ def main():
                 console.print("[bold red]No memory found.[/bold red]")
             Prompt.ask("\nPress Enter to continue", default="")
         elif choice == '10':
+            # Phase 8, section 6 — the CLI's own mirror of the web GUI's Firewall/NAS/
+            # Twingate status dots (server.py's _compute_integration_status(), same
+            # 5-state values, same Rich-table pattern choice '7'/'8' already established
+            # for this CLI/GUI consistency pass).
+            from server import _compute_integration_status
+            status = _compute_integration_status()
+            state_style = {"connected": "bold green", "degraded": "bold yellow",
+                           "disconnected": "dim", "error": "bold red"}
+            table = Table(title="Home Network Infrastructure", border_style="cyan")
+            table.add_column("Integration", style="bold cyan")
+            table.add_column("Status")
+            for key, label in (("twingate", "🔒 Twingate"), ("firewall", "🧱 Firewall (OPNsense)"), ("nas", "💾 NAS (UGREEN)")):
+                state = status.get(key, "error")
+                table.add_row(label, f"[{state_style.get(state, 'white')}]{state}[/]")
+            console.print(table)
+            Prompt.ask("\nPress Enter to continue", default="")
+        elif choice == '11':
             console.print("[bold green]Shutting down.[/bold green]")
             sys.exit(0)
 
