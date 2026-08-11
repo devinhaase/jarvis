@@ -73,10 +73,16 @@ CATEGORIES = (
     # separate from "alerts" (posture_monitor.py's own category) so a device can toggle
     # network-specific notifications independently of general security-posture ones.
     "network_anomaly", "new_device", "failed_logins", "backup_failure",
+    # uptime_kuma_monitor.py — a monitor going down/recovering. Separate from the Phase 8
+    # categories above since this watches Devin's own external infrastructure (a switch,
+    # ESXi, a load balancer...) via Uptime Kuma, not this project's own network/firewall
+    # tools — a different signal source, worth toggling independently.
+    "infrastructure_down",
 )
 DEFAULT_CATEGORIES = {
     "approvals": True, "alerts": True, "briefing": True, "messages": False,
     "network_anomaly": True, "new_device": True, "failed_logins": True, "backup_failure": True,
+    "infrastructure_down": True,
 }
 DEFAULT_QUIET_HOURS = {"enabled": False, "start": "22:00", "end": "07:00"}
 

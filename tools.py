@@ -371,6 +371,20 @@ try:
 except Exception as _net_err:
     pass  # Network tools unavailable — Jarvis continues without them
 
+# --- Uptime Kuma (Devin's own instance, port 3001, this machine) — read-only, no
+# credentials, no Twingate gate (co-located with the brain, not a home-network resource
+# reached remotely — see uptime_kuma_tools.py's own module docstring for why that
+# distinction matters here).
+try:
+    from uptime_kuma_tools import get_uptime_kuma_status
+
+    uptime_kuma_reg = {
+        "get_uptime_kuma_status": Tool("get_uptime_kuma_status", "Check the current up/down status and 24h uptime percentage of every monitor on Devin's Uptime Kuma instance", Tier.TIER_1, get_uptime_kuma_status, team="network"),
+    }
+    ops_tools = {**ops_tools, **uptime_kuma_reg}
+except Exception as _kuma_err:
+    pass  # Uptime Kuma tool unavailable — Jarvis continues without it
+
 ALL_TOOLS = {**assistant_tools, **ops_tools}
 
 # --- Security Tools (registered separately; require authorized_targets.json) ---
@@ -654,6 +668,8 @@ REQUIRES_CAPABILITY = {
     "bandwidth_sample": "filesystem",       # psutil reads the server host's own interfaces
     "check_wan_status": "filesystem",       # SSDP multicast from the server host
     "diagnose_connectivity": "filesystem",  # composes the above
+    # Uptime Kuma — HTTP calls to localhost:3001 on the server host specifically.
+    "get_uptime_kuma_status": "filesystem",
     # Twingate gate (Phase 8) — shells out to the twingate CLI on the server host.
     "get_twingate_status": "filesystem",
     "disable_twingate_requirement": "filesystem",

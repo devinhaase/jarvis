@@ -210,6 +210,13 @@ async def _lifespan(_app: FastAPI):
 
     integration_status_task = asyncio.create_task(_integration_status_cache_loop(broadcast_all=_broadcast_all))
 
+    uptime_kuma_task = None
+    try:
+        from uptime_kuma_monitor import uptime_kuma_monitor_loop
+        uptime_kuma_task = asyncio.create_task(uptime_kuma_monitor_loop(broadcast_all=_broadcast_all))
+    except Exception as e:
+        print(f"[Server] Uptime Kuma monitor not started: {e}")
+
     yield
 
     if monitor_task:
@@ -223,6 +230,8 @@ async def _lifespan(_app: FastAPI):
     if network_monitor_task:
         network_monitor_task.cancel()
     integration_status_task.cancel()
+    if uptime_kuma_task:
+        uptime_kuma_task.cancel()
 
 
 app = FastAPI(title="Jarvis Server", lifespan=_lifespan)

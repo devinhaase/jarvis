@@ -1,6 +1,6 @@
 # MEMORY.md — What Jarvis has learned
 
-_Auto-generated from data/semantic_memory.json — do not hand-edit, changes will be overwritten on the next fact/preference update. Last generated: 2026-08-10 19:06 UTC._
+_Auto-generated from data/semantic_memory.json — do not hand-edit, changes will be overwritten on the next fact/preference update. Last generated: 2026-08-11 01:53 UTC._
 
 ## Ongoing facts
 
@@ -29,6 +29,7 @@ _Auto-generated from data/semantic_memory.json — do not hand-edit, changes wil
 - Disarm completed with reason "to ensure firewall access and verify safety"
 - Unknown device with MAC address aa:bb:cc:11:22:33 joined network; Twingate not connected, preventing firewall log access.
 - The NAS IP is 192.168.1.50; local ARP table shows 15 devices including router, NAS, and printer.
+- Firewall logs accessible after reconnecting Twingate
 
 ## Active projects
 

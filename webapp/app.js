@@ -24,6 +24,7 @@ const els = {
   pushCatNewDevice: $("#pushCatNewDevice"),
   pushCatFailedLogins: $("#pushCatFailedLogins"),
   pushCatBackupFailure: $("#pushCatBackupFailure"),
+  pushCatInfrastructureDown: $("#pushCatInfrastructureDown"),
   pushQuietEnabled: $("#pushQuietEnabled"),
   pushQuietStart: $("#pushQuietStart"),
   pushQuietEnd: $("#pushQuietEnd"),
@@ -775,6 +776,7 @@ function renderPushSettings(settings) {
   els.pushCatNewDevice.checked = cats.new_device !== false;
   els.pushCatFailedLogins.checked = cats.failed_logins !== false;
   els.pushCatBackupFailure.checked = cats.backup_failure !== false;
+  els.pushCatInfrastructureDown.checked = cats.infrastructure_down !== false;
   const qh = settings.quiet_hours || {};
   els.pushQuietEnabled.checked = !!qh.enabled;
   els.pushQuietStart.value = qh.start || "22:00";
@@ -804,12 +806,14 @@ function _sendCategoryUpdate() {
       new_device: els.pushCatNewDevice.checked,
       failed_logins: els.pushCatFailedLogins.checked,
       backup_failure: els.pushCatBackupFailure.checked,
+      infrastructure_down: els.pushCatInfrastructureDown.checked,
     },
   });
 }
 for (const el of [
   els.pushCatApprovals, els.pushCatAlerts, els.pushCatBriefing, els.pushCatMessages,
   els.pushCatNetworkAnomaly, els.pushCatNewDevice, els.pushCatFailedLogins, els.pushCatBackupFailure,
+  els.pushCatInfrastructureDown,
 ]) {
   el.addEventListener("change", _sendCategoryUpdate);
 }
