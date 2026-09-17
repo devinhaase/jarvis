@@ -127,6 +127,38 @@ html, body {
   background-size: 36px 36px, 36px 36px, 100% 100%;
 }
 
+/* ---------- Depth layers: the film leans on layered translucency + parallax to read as
+   3D, more than raw brightness — this is the cheap web equivalent. Two extra fixed planes
+   behind the real content, each blurrier/dimmer/coarser than the last (a depth-of-field
+   cue on its own, even at rest), and each drifts at a different, slower rate than the
+   foreground when the chat/dashboard scrolls (app.js/dashboard.js set --depth-scroll on
+   #app/#dashPage; pure decoration, never intercepts clicks, dark theme only). ---------- */
+.depth-layer { position: fixed; inset: -10% -10% -10% -10%; pointer-events: none; z-index: 0; opacity: 0; will-change: transform; }
+:root:not([data-theme="light"]) .depth-layer,
+:root[data-theme="dark"] .depth-layer { opacity: 1; }
+
+.depth-layer-mid {
+  background: radial-gradient(ellipse 900px 500px at 78% 12%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 65%);
+  filter: blur(2px);
+  transform: translateY(calc(var(--depth-scroll, 0px) * -0.04));
+}
+.depth-layer-far {
+  background-image:
+    linear-gradient(rgba(150,210,255,0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(150,210,255,0.05) 1px, transparent 1px);
+  background-size: 132px 132px;
+  filter: blur(4px);
+  opacity: 0.5;
+  transform: translateY(calc(var(--depth-scroll, 0px) * -0.015));
+}
+:root:not([data-theme="light"]) .depth-layer-far,
+:root[data-theme="dark"] .depth-layer-far { opacity: 0.5; }
+
+/* content needs to sit above the depth layers now that they're real elements, not just
+   #app's own background — .hud-corner/.hud-scan already sit above via their own fixed
+   z-index, so they're deliberately left out here. */
+#sidebar, #contentArea { position: relative; z-index: 1; }
+
 /* ---------- HUD chrome: corner brackets + scan sweep (decorative, dark theme only) ---------- */
 
 .hud-corner { position: fixed; width: 20px; height: 20px; border: 1px solid var(--hud-line); opacity: 0; pointer-events: none; z-index: 40; transition: opacity 0.2s ease; }

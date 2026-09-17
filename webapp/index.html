@@ -15,6 +15,12 @@
 <body>
 <div id="app">
 
+  <!-- Depth layers — two extra background planes behind everything else, each
+       blurrier/dimmer/coarser than the last, that drift at a slower rate than the
+       foreground when .messages scrolls (see app.js). Purely decorative. -->
+  <div class="depth-layer depth-layer-mid" aria-hidden="true"></div>
+  <div class="depth-layer depth-layer-far" aria-hidden="true"></div>
+
   <!-- HUD corner brackets — purely decorative (Iron Man HUD look), hidden from
        screen readers and never targeted by app.js. -->
   <div class="hud-corner hud-corner-tl" aria-hidden="true"></div>

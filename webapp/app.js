@@ -1710,3 +1710,26 @@ boot();
   tryOpen();
   history.replaceState(null, "", window.location.pathname);
 })();
+
+// ---------------------------------------------------------------------------
+// Depth-layer parallax (see style.css's ".depth-layer" comment) — the two extra
+// background planes drift at a slower rate than .messages as it scrolls, via a
+// --depth-scroll custom property each layer's transform reads. rAF-throttled so a fast
+// trackpad fling doesn't queue up a pile of unapplied writes; passive listener since this
+// never calls preventDefault. Pure decoration — if #app or #messages is ever missing this
+// just does nothing, never an error.
+// ---------------------------------------------------------------------------
+(function _setupDepthParallax() {
+  const scroller = els.messages;
+  const target = document.getElementById("app");
+  if (!scroller || !target) return;
+  let ticking = false;
+  scroller.addEventListener("scroll", () => {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(() => {
+      target.style.setProperty("--depth-scroll", `${scroller.scrollTop}px`);
+      ticking = false;
+    });
+  }, { passive: true });
+})();

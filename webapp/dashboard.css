@@ -18,7 +18,17 @@
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
+:root:not([data-theme="light"]) #dashPage,
+:root[data-theme="dark"] #dashPage {
+  background-image:
+    linear-gradient(rgba(150,210,255,0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(150,210,255,0.045) 1px, transparent 1px);
+  background-size: 36px 36px;
+}
+/* content sits above the fixed depth-layer planes (style.css) */
+#dashTopBar, #dashMain { position: relative; z-index: 1; }
 
 #dashTopBar {
   display: flex;

@@ -558,3 +558,23 @@ function openTeamOnceReady(teamKey) {
   openTeamOnceReady(team);
   history.replaceState(null, "", window.location.pathname);
 })();
+
+// ---------------------------------------------------------------------------
+// Depth-layer parallax — same mechanism as app.js's own copy (see style.css's
+// ".depth-layer" comment), scoped to this page's own scroller (#dashMain) and target
+// (#dashPage) instead of app.js's #messages/#app.
+// ---------------------------------------------------------------------------
+(function _setupDepthParallax() {
+  const scroller = document.getElementById("dashMain");
+  const target = document.getElementById("dashPage");
+  if (!scroller || !target) return;
+  let ticking = false;
+  scroller.addEventListener("scroll", () => {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(() => {
+      target.style.setProperty("--depth-scroll", `${scroller.scrollTop}px`);
+      ticking = false;
+    });
+  }, { passive: true });
+})();
