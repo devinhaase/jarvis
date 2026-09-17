@@ -24,9 +24,18 @@ ai.dhaaselab.com {
 # rather than a public ACME challenge (a LAN IP can't get a public cert). This is what lets
 # the phone get a secure context (mic input, push, PWA install) while on the home network,
 # without needing Tailscale/Twingate connected at all — those stay reserved for being away
-# from home. Swap 192.168.1.147 below for this machine's actual LAN IP if it ever changes;
-# static-reserve it in the router's DHCP settings so this doesn't need editing every reboot.
-https://192.168.1.147:8443 {
+# from home.
+#
+# Two addresses listed on purpose: 192.168.1.147 is the home LAN address; 138.247.39.30 was
+# added temporarily while this machine was on a different network away from home (see
+# task.md/REMOTE_ACCESS.md's note on this) — remove it once that's no longer needed, or add
+# a new address the same way if the home LAN IP ever changes. Reserve whichever IPs matter
+# as static DHCP leases in the router so this doesn't drift.
+#
+# IMPORTANT: 138.247.39.30 is NOT a private/LAN-range address — do not open a firewall rule
+# for port 8443 on any network profile broader than "Private" while this line is active,
+# or Jarvis becomes reachable from more than just this trusted network.
+https://192.168.1.147:8443, https://138.247.39.30:8443 {
 	tls lan_cert.pem lan_key.pem
 	reverse_proxy localhost:8765
 }
