@@ -8,6 +8,8 @@
      reuses as-is (modal-overlay/modal, tool-entry/tool-group-title/tool-desc, text-btn,
      icon-btn) — dashboard.css only adds what's actually unique to this page. See
      dashboard.css's own header comment. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
 <link rel="stylesheet" href="/dashboard.css">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
@@ -16,8 +18,19 @@
 <body>
 <div id="dashPage">
 
+  <div class="hud-corner hud-corner-tl" aria-hidden="true"></div>
+  <div class="hud-corner hud-corner-tr" aria-hidden="true"></div>
+  <div class="hud-corner hud-corner-bl" aria-hidden="true"></div>
+  <div class="hud-corner hud-corner-br" aria-hidden="true"></div>
+  <div class="hud-scan" aria-hidden="true"></div>
+
   <header id="dashTopBar">
     <a id="backLink" href="/" title="Back to chat">&larr;</a>
+    <div class="reactor-avatar reactor-avatar-sm" aria-hidden="true">
+      <span class="reactor-ring-outer"></span>
+      <span class="reactor-ring-inner"></span>
+      <span class="reactor-core"></span>
+    </div>
     <span class="brand">JARVIS <span class="dim">— Dashboard</span></span>
     <span id="connStatus" class="conn-status offline">connecting…</span>
   </header>

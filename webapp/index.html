@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Jarvis</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
 <link rel="manifest" href="/manifest.json">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
@@ -12,6 +14,14 @@
 </head>
 <body>
 <div id="app">
+
+  <!-- HUD corner brackets — purely decorative (Iron Man HUD look), hidden from
+       screen readers and never targeted by app.js. -->
+  <div class="hud-corner hud-corner-tl" aria-hidden="true"></div>
+  <div class="hud-corner hud-corner-tr" aria-hidden="true"></div>
+  <div class="hud-corner hud-corner-bl" aria-hidden="true"></div>
+  <div class="hud-corner hud-corner-br" aria-hidden="true"></div>
+  <div class="hud-scan" aria-hidden="true"></div>
 
   <button id="sidebarToggle" class="icon-btn sidebar-toggle" title="Toggle conversations">☰</button>
 
@@ -72,6 +82,11 @@
   <div id="contentArea">
     <main id="main">
       <header id="chatHeader">
+        <div class="reactor-avatar" aria-hidden="true">
+          <span class="reactor-ring-outer"></span>
+          <span class="reactor-ring-inner"></span>
+          <span class="reactor-core"></span>
+        </div>
         <h1 id="convTitle" contenteditable="true" spellcheck="false">Jarvis</h1>
         <span id="projectBadge" class="project-badge hidden"></span>
         <span id="listeningIndicator" class="listening-indicator hidden">

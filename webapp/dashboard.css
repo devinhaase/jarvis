@@ -79,7 +79,8 @@
 }
 .team-tile {
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 0;
+  clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
   padding: 14px;
   cursor: pointer;
   background: var(--bg-sidebar);
@@ -138,7 +139,8 @@
   gap: 10px;
   padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 0;
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
   background: var(--bg-sidebar);
 }
 .queue-item .queue-badge {
@@ -168,7 +170,7 @@
 .log-entry {
   padding: 9px 12px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 0;
   font-size: 12.5px;
   background: var(--bg-sidebar);
 }
@@ -186,7 +188,8 @@
   align-items: center;
   gap: 6px;
   padding: 6px 12px;
-  border-radius: 999px;
+  border-radius: 0;
+  border: 1px solid var(--border);
   background: var(--hover);
   font-size: 12px;
   color: var(--text-dim);
@@ -210,7 +213,7 @@
   gap: 10px;
   padding: 8px 12px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 0;
   font-size: 12.5px;
   background: var(--bg-sidebar);
 }
