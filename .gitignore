@@ -35,6 +35,11 @@ Thumbs.db
 # Downloaded binary, not project content — re-fetched via caddy/README.md, not committed
 caddy/caddy.exe
 
+# mkcert-issued LAN cert/key (Remote Access rework) — machine-specific, regenerated locally
+# per REMOTE_ACCESS.md's "Local HTTPS on the LAN" section, never committed.
+caddy/lan_cert.pem
+caddy/lan_key.pem
+
 # Local tool config, not project content
 .claude/
 

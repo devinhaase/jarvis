@@ -1,11 +1,11 @@
 ---
 name: system_health_check
-status: active
+status: proposed
 tier: TIER_1
 team: it
-version: 1
-created_at: 1786237348.0411735
-updated_at: 1786238123.615814
+version: 3
+created_at: 1786807332.0422034
+updated_at: 1786807332.0422034
 success_count: 0
 fail_count: 0
 flagged: false
@@ -15,8 +15,9 @@ tools: check_system_health, get_security_posture
 
 ## When to use
 
-When assessing the overall system health, including both performance and security aspects, this combination of tools is used.
+When assessing a system's overall health and security status
 
 ## Steps
 
-1. 1. Check system CPU usage using check_system_health. 2. Evaluate local machine security posture (Defender, firewall, patches, listening services) using get_security_posture.
+1. check_cpu_usage
+2. check_security_posture

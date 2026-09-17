@@ -18,3 +18,15 @@ ai.dhaaselab.com {
 	}
 	reverse_proxy localhost:8765
 }
+
+# Local HTTPS on the LAN (Remote Access rework — see REMOTE_ACCESS.md's "Local HTTPS on the
+# LAN" section) — a real trusted cert for the machine's LAN IP, issued by mkcert's local CA
+# rather than a public ACME challenge (a LAN IP can't get a public cert). This is what lets
+# the phone get a secure context (mic input, push, PWA install) while on the home network,
+# without needing Tailscale/Twingate connected at all — those stay reserved for being away
+# from home. Swap 192.168.1.147 below for this machine's actual LAN IP if it ever changes;
+# static-reserve it in the router's DHCP settings so this doesn't need editing every reboot.
+https://192.168.1.147:8443 {
+	tls lan_cert.pem lan_key.pem
+	reverse_proxy localhost:8765
+}

@@ -83,3 +83,64 @@ gap with the same one-time setup, rather than treating them as two separate prob
   URL — item 6 could only be verified up to the server-sends-a-real-push step in this
   session's sandboxed browser; this is the step that actually needed a real phone anyway,
   and now also needs the secure-context fix above to even attempt subscribing.
+
+## Local HTTPS on the LAN (so VPN is only needed away from home)
+
+The setup above made `ai.dhaaselab.com` (over Tailscale) the *only* secure context this app
+had, which meant mic input, push notifications, and PWA install all silently required being
+connected to the VPN — even at home, on the same network as the machine running the server.
+That's backwards: VPN should only be needed when actually away from home. The fix is a
+*second* real cert, issued for the LAN IP itself via [mkcert](https://github.com/FiloSottile/mkcert)
+(a local, self-signed CA you trust once per device — not a public ACME cert, since a public CA
+won't issue for a private IP).
+
+**One-time setup on the machine running the server (Devin's own action):**
+
+1. Install mkcert: `choco install mkcert` (or download the release exe) and run `mkcert -install`
+   once — this creates and trusts a local root CA on this machine.
+2. Generate the LAN cert (swap the IP if it's ever different from the current
+   `192.168.1.147`; reserve it as a DHCP static lease in the router so it doesn't drift):
+   ```
+   cd caddy
+   mkcert -cert-file lan_cert.pem -key-file lan_key.pem 192.168.1.147
+   ```
+   `lan_cert.pem`/`lan_key.pem` are gitignored — regenerate them on any machine that ever
+   runs this Caddy config, never commit them.
+3. `caddy/Caddyfile` already has a second site block for `https://192.168.1.147:8443` using
+   this cert (added alongside the existing `ai.dhaaselab.com` block) — `start_caddy.ps1`
+   picks up both automatically, no separate process needed.
+4. Open Windows Firewall to that port on the private/home profile: allow inbound TCP 8443
+   for `caddy.exe` (same idea as the existing 8765 rule for `server.py` itself).
+
+**One-time setup per device (phone, laptop) — trust the local CA:**
+
+- mkcert's root CA is a single file: run `mkcert -CAROOT` on the server machine to find it
+  (usually `rootCA.pem`), then transfer it to each device and install it as a trusted root
+  certificate (Android: Settings → Security → Encryption & credentials → Install a
+  certificate → CA certificate; Windows/macOS: double-click → install into the system/login
+  Trusted Root store). This is a one-time step per device, not per connection.
+- The Android app now tries `https://192.168.1.147:8443` first, falls back to plain
+  `http://192.168.1.147:8765` (e.g. before the CA is trusted yet), and only reaches for the
+  VPN domain if neither local address answers — see `ConnectionManager.kt`'s updated
+  `resolve()`. A plain browser on the LAN can just be pointed at
+  `https://192.168.1.147:8443` directly.
+
+**Net effect:** at home, everything (chat, mic, push, PWA install) works over the LAN without
+Tailscale or Twingate connected at all. Away from home, the app automatically falls back to
+the `ai.dhaaselab.com` VPN domain exactly as before — nothing about the away-from-home path
+changed.
+
+## About Twingate/Tailscale's own "kill switch" (not code — an app setting)
+
+There is no in-band kill switch left in this codebase (see `SECURITY_INCIDENT_RUNBOOK.md`'s
+"Stop everything" section — the old file-flag emergency-stop tool was removed at Devin's
+request in an earlier session). If something is still blocking all traffic when the VPN
+client disconnects, that's Twingate's own **Internet Security** feature (an admin-console
+setting, sometimes deployed as an "always-on"/full-tunnel mode via a Machine Key — see
+https://www.twingate.com/docs/internet-security-client-configuration) or, if using a
+router-level kill switch, that router's own "block non-VPN traffic" rule — neither lives in
+this repo. To turn it off: Twingate Admin Console → the relevant Network's client
+configuration → disable Internet Security / remove the enforced Machine Key so the desktop
+client can be freely signed out or switched off; Tailscale itself doesn't ship a traffic
+kill switch by default, so if traffic is being blocked there it's most likely a router-level
+rule (e.g. a GL.iNet "block non-VPN traffic" toggle) rather than the Tailscale client itself.

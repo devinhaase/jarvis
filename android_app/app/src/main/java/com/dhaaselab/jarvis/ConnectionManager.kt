@@ -32,6 +32,10 @@ object ConnectionManager {
 
     private const val LOCAL_TIMEOUT_MS = 1500
     private const val VPN_TIMEOUT_MS = 3000
+    // Cert isn't trusted yet on a device that hasn't done the one-time mkcert root CA
+    // install (see REMOTE_ACCESS.md) — kept short since this is just probing an address we
+    // already expect to be on the same LAN, not a real network round-trip.
+    private const val LOCAL_HTTPS_TIMEOUT_MS = 1200
     private const val WOL_RETRY_WINDOW_MS = 30_000L
     private const val WOL_RETRY_INTERVAL_MS = 2_000L
 
@@ -83,6 +87,17 @@ object ConnectionManager {
     ): Resolution {
         val local = ConnectionPrefs.localAddress(context)
         val localUrl = "http://$local/"
+        val localHost = local.substringBeforeLast(":")
+        val localHttpsUrl = "https://$localHost:${ConnectionPrefs.localHttpsPort(context)}/"
+
+        // https first — a secure context on the LAN (see ConnectionPrefs' docstring) so mic/
+        // push/PWA-install work at home without needing the VPN at all. Falls back to plain
+        // http (e.g. this device hasn't trusted the mkcert root CA yet, or Caddy's local
+        // site isn't running) before ever trying the VPN — VPN is the away-from-home path,
+        // not something a device on the same LAN should need.
+        if (isReachable(localHttpsUrl, LOCAL_HTTPS_TIMEOUT_MS)) {
+            return Resolution.Success(localHttpsUrl, Via.LOCAL)
+        }
         if (isReachable(localUrl, LOCAL_TIMEOUT_MS)) {
             return Resolution.Success(localUrl, Via.LOCAL)
         }

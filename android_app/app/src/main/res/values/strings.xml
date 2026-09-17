@@ -14,9 +14,11 @@
 
     <string name="settings_label_connected_via">Connected via</string>
     <string name="settings_label_local">Local address (home wifi)</string>
-    <string name="settings_label_vpn">VPN domain (HTTPS, Tailscale)</string>
+    <string name="settings_label_local_https_port">Local HTTPS port (home wifi, secure)</string>
+    <string name="settings_label_vpn">VPN domain (HTTPS, away from home)</string>
     <string name="settings_label_computer_name">Main computer name</string>
     <string name="settings_hint_local">e.g. 192.168.1.147:8765</string>
+    <string name="settings_hint_local_https_port">e.g. 8443</string>
     <string name="settings_hint_vpn">e.g. ai.dhaaselab.com</string>
     <string name="btn_save">Save</string>
 

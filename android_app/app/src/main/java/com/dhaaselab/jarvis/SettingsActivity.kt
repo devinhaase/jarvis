@@ -34,11 +34,13 @@ class SettingsActivity : AppCompatActivity() {
         val connectedViaText: TextView = findViewById(R.id.connectedViaText)
         val computerNameInput: EditText = findViewById(R.id.computerNameInput)
         val localAddressInput: EditText = findViewById(R.id.localAddressInput)
+        val localHttpsPortInput: EditText = findViewById(R.id.localHttpsPortInput)
         val vpnAddressInput: EditText = findViewById(R.id.vpnAddressInput)
         val saveButton: Button = findViewById(R.id.saveButton)
 
         computerNameInput.setText(ConnectionPrefs.computerName(this))
         localAddressInput.setText(ConnectionPrefs.localAddress(this))
+        localHttpsPortInput.setText(ConnectionPrefs.localHttpsPort(this))
         vpnAddressInput.setText(ConnectionPrefs.vpnAddress(this))
 
         // Re-checks reachability live rather than just showing whatever MainActivity last
@@ -65,6 +67,7 @@ class SettingsActivity : AppCompatActivity() {
                 computerNameInput.text.toString().trim(),
                 localAddressInput.text.toString().trim(),
                 vpnAddressInput.text.toString().trim(),
+                localHttpsPortInput.text.toString().trim(),
             )
             finish()  // MainActivity's onResume() re-resolves against the new addresses
         }
