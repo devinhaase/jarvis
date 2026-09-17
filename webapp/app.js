@@ -746,8 +746,19 @@ function renderIntegrationStatus(status) {
   for (const [id, state] of Object.entries(dots)) {
     const el = document.getElementById(id);
     if (!el || !state) continue;  // undefined = this dot's key wasn't in the payload; leave it alone
+    const previousState = el.dataset.state;
+    const changed = previousState !== state;
     el.dataset.state = state;
     el.title = `${INTEGRATION_DOT_TITLE[id]}: ${INTEGRATION_STATE_LABEL[state] || state}`;
+    // HUD instruments should announce a real change, not sit static — a quick slide+fade
+    // "fly-in" whenever a dot's state actually flips (not on every re-render of the same
+    // state, and not for the initial loading->first-real-status transition, which is just
+    // the page settling in, not an event worth calling out).
+    if (changed && state !== "loading" && previousState !== "loading") {
+      el.classList.remove("hud-flyin");
+      void el.offsetWidth;  // restart the animation even if it's still mid-run from a prior flip
+      el.classList.add("hud-flyin");
+    }
   }
 }
 

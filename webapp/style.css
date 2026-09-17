@@ -826,6 +826,16 @@ a.text-btn { display: inline-block; text-decoration: none; }
   border: 1px solid var(--bg-sidebar);
 }
 
+/* Widgets should announce a change rather than just sitting there (the movie HUD's own
+   habit — elements fly in when relevant, they don't stay static). Triggered from app.js
+   only when a dot's state actually flips. */
+.integration-dot.hud-flyin { animation: hudFlyIn 0.45s cubic-bezier(0.2, 0.9, 0.3, 1); }
+@keyframes hudFlyIn {
+  0% { transform: translateY(-6px) scale(0.6); opacity: 0; }
+  55% { transform: translateY(0.5px) scale(1.15); opacity: 1; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+
 .pending-badge {
   display: inline-block;
   min-width: 15px;
