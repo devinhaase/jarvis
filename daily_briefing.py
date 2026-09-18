@@ -73,6 +73,18 @@ def gather_snapshot() -> dict:
             snapshot[name] = tool.execute()
         except Exception as e:
             snapshot[name] = {"error": str(e)}
+
+    # observer.py's routine-event digest — findings the monitors saw but didn't push for,
+    # since they'd already recurred 3+ times this week. Only added when there's actually
+    # something to say, so a quiet week doesn't add an empty section for the LLM to pad out.
+    try:
+        import observer
+        digest = observer.get_routine_digest()
+        if digest:
+            snapshot["routine_events_digest"] = digest
+    except Exception:
+        pass
+
     return snapshot
 
 
@@ -92,6 +104,9 @@ def compose_briefing(brain, snapshot: dict):
         "sales pitches, newsletters, cold outreach) as noise, not action items — do not "
         "suggest replying to or acting on it. Only surface an email if it's genuinely "
         "time-sensitive or from someone who needs a real reply.\n\n"
+        "For routine_events_digest specifically, if present: mention it in one short, "
+        "low-key clause (e.g. 'the usual guest device reconnects, nothing new') — these "
+        "already recurred enough times this week to be expected, not something to dwell on.\n\n"
         f"DATA:\n{json.dumps(snapshot, indent=2, default=str)[:6000]}"
     )
     try:

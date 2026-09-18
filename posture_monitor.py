@@ -79,6 +79,20 @@ def _parse_snapshot(posture: dict) -> dict:
     return parsed
 
 
+def _category_for(finding: str) -> str:
+    """Mirrors network_monitor.py's own _category_for() — the dedup key observer.py needs
+    to tell "this same kind of posture change keeps happening" from a genuinely new one."""
+    if finding.startswith(("Antivirus", "Real-time protection", "Antispyware")):
+        return "defender"
+    if finding.startswith("Firewall profile"):
+        return "firewall"
+    if finding.startswith("Pending Windows updates"):
+        return "updates"
+    if finding.startswith("New listening port"):
+        return "new_port"
+    return "posture_other"
+
+
 def diff_snapshots(old: dict, new: dict) -> list:
     """Returns a list of human-readable finding strings — empty if nothing notable changed.
     Deliberately one-directional on Defender/firewall (flags OFF, not back ON) and on
@@ -150,8 +164,22 @@ async def _take_snapshot_and_check(broadcast_all):
     if old_snapshot is not None:
         findings = diff_snapshots(old_snapshot, new_snapshot)
         if findings:
+            # See observer.py's own docstring — the same "3+ times in a week stops being
+            # news" classification network_monitor.py uses, applied here too rather than
+            # paging for e.g. a firewall profile that some other app keeps toggling.
+            import observer
+            novel_findings = []
+            annotated_lines = []
+            for finding in findings:
+                urgency = observer.record_and_classify("posture", _category_for(finding), finding)
+                if urgency == "novel":
+                    novel_findings.append(finding)
+                    annotated_lines.append(f"- {finding}")
+                else:
+                    annotated_lines.append(f"- {finding} (recurring — auto-suppressed from push)")
+
             conv_id = _get_or_create_monitor_conversation()
-            text = "Posture change detected:\n" + "\n".join(f"- {f}" for f in findings)
+            text = "Posture change detected:\n" + "\n".join(annotated_lines)
             store.add_message(conv_id, "assistant", text, source="text")
             if broadcast_all:
                 # Renders live for anyone with this conversation open right now...
@@ -165,13 +193,14 @@ async def _take_snapshot_and_check(broadcast_all):
                 await broadcast_all({"type": "conversation_list_changed"})
             # Phase 6 item 6: "alerts" category — a posture regression is exactly the kind
             # of thing worth reaching a phone for, not just a conversation nobody has open.
-            try:
-                import push_notifications as _push
-                headline = findings[0] if len(findings) == 1 else f"{len(findings)} changes — {findings[0]}"
-                await asyncio.to_thread(_push.send_to_all, "alerts", "Jarvis: security posture change", headline,
-                                         tag="posture", conversation_id=conv_id)
-            except Exception:
-                pass
+            if novel_findings:
+                try:
+                    import push_notifications as _push
+                    headline = novel_findings[0] if len(novel_findings) == 1 else f"{len(novel_findings)} changes — {novel_findings[0]}"
+                    await asyncio.to_thread(_push.send_to_all, "alerts", "Jarvis: security posture change", headline,
+                                             tag="posture", conversation_id=conv_id)
+                except Exception:
+                    pass
 
     _save_snapshot(new_snapshot)
 

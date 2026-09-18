@@ -286,8 +286,24 @@ async def _take_snapshot_and_check(broadcast_all):
     findings, updated_state = diff_snapshots(baseline_state, new_snapshot)
 
     if findings and not is_first_run:
+        # observer.py classifies each finding against its own recent history before
+        # anything reaches a push notification — a finding that's fired 3+ times in the
+        # last week (e.g. the same guest device reconnecting every morning) still gets the
+        # full record below, it just stops interrupting your phone for it.
+        import observer
+        novel_findings = []
+        annotated_lines = []
+        for finding in findings:
+            category = _category_for(finding)
+            urgency = observer.record_and_classify("network", category, finding)
+            if urgency == "novel":
+                novel_findings.append(finding)
+                annotated_lines.append(f"- {finding}")
+            else:
+                annotated_lines.append(f"- {finding} (recurring — auto-suppressed from push)")
+
         conv_id = _get_or_create_monitor_conversation()
-        text = "Network monitor:\n" + "\n".join(f"- {f}" for f in findings)
+        text = "Network monitor:\n" + "\n".join(annotated_lines)
         store.add_message(conv_id, "assistant", text, source="text")
         if broadcast_all:
             await broadcast_all({
@@ -296,15 +312,16 @@ async def _take_snapshot_and_check(broadcast_all):
             })
             await broadcast_all({"type": "conversation_list_changed"})
 
-        try:
-            import push_notifications as _push
-            for finding in findings:
-                await asyncio.to_thread(
-                    _push.send_to_all, _category_for(finding), "Jarvis: network alert",
-                    finding, tag="network-monitor", conversation_id=conv_id,
-                )
-        except Exception:
-            pass
+        if novel_findings:
+            try:
+                import push_notifications as _push
+                for finding in novel_findings:
+                    await asyncio.to_thread(
+                        _push.send_to_all, _category_for(finding), "Jarvis: network alert",
+                        finding, tag="network-monitor", conversation_id=conv_id,
+                    )
+            except Exception:
+                pass
 
     _save_baseline_state(updated_state)
 

@@ -31,10 +31,14 @@ DEFAULT_INTERVAL_SECONDS = 2 * 60
 
 def diff_snapshots(old_state: dict, new_monitors: list) -> tuple:
     """old_state: {monitor_name: "up"|"down"|...} from the last check. new_monitors: the
-    live list from get_uptime_kuma_status(). Returns (findings: list[str], new_state: dict)
-    — new_state always reflects every monitor's current status, whether or not anything
-    changed, so the next cycle has an accurate baseline regardless."""
+    live list from get_uptime_kuma_status(). Returns (findings: list[str], names: list[str],
+    new_state: dict) — names[i] is which monitor findings[i] is about (observer.py's dedup
+    key, since a monitor that flaps down/up/down/up repeatedly should be recognized as one
+    recurring problem regardless of which direction it just flipped). new_state always
+    reflects every monitor's current status, whether or not anything changed, so the next
+    cycle has an accurate baseline regardless."""
     findings = []
+    names = []
     new_state = {}
 
     for m in new_monitors:
@@ -54,8 +58,11 @@ def diff_snapshots(old_state: dict, new_monitors: list) -> tuple:
             findings.append(f"🟢 {name} is back UP (was down).")
         elif status in ("down", "pending") or old_status in ("down", "pending"):
             findings.append(f"{name} changed from {old_status} to {status}.")
+        else:
+            continue
+        names.append(name)
 
-    return findings, new_state
+    return findings, names, new_state
 
 
 def _load_state() -> dict:
@@ -96,11 +103,26 @@ async def _check_and_post(broadcast_all):
 
     old_state = _load_state()
     is_first_run = not old_state
-    findings, new_state = diff_snapshots(old_state, result["monitors"])
+    findings, names, new_state = diff_snapshots(old_state, result["monitors"])
 
     if findings and not is_first_run:
+        # Category here is per-monitor-name rather than per-direction, deliberately — a
+        # monitor that flaps down/up/down/up repeatedly is exactly the "already recurring,
+        # stop paging for it" case observer.py exists for, and both directions belong to
+        # the same underlying flapping problem.
+        import observer
+        novel_findings = []
+        annotated_lines = []
+        for finding, name in zip(findings, names):
+            urgency = observer.record_and_classify("uptime_kuma", name, finding)
+            if urgency == "novel":
+                novel_findings.append(finding)
+                annotated_lines.append(f"- {finding}")
+            else:
+                annotated_lines.append(f"- {finding} (recurring — auto-suppressed from push)")
+
         conv_id = _get_or_create_monitor_conversation()
-        text = "Infrastructure monitor:\n" + "\n".join(f"- {f}" for f in findings)
+        text = "Infrastructure monitor:\n" + "\n".join(annotated_lines)
         store.add_message(conv_id, "assistant", text, source="text")
         if broadcast_all:
             await broadcast_all({
@@ -109,19 +131,20 @@ async def _check_and_post(broadcast_all):
             })
             await broadcast_all({"type": "conversation_list_changed"})
 
-        try:
-            import push_notifications as _push
-            for finding in findings:
-                # "down" findings page through quiet hours (critical=True) — an actual
-                # outage is exactly the kind of thing worth waking up for; a recovery
-                # notification doesn't need to.
-                is_down = "just went DOWN" in finding
-                await asyncio.to_thread(
-                    _push.send_to_all, "infrastructure_down", "Jarvis: infrastructure alert",
-                    finding, tag="uptime-kuma", conversation_id=conv_id, critical=is_down,
-                )
-        except Exception:
-            pass
+        if novel_findings:
+            try:
+                import push_notifications as _push
+                for finding in novel_findings:
+                    # "down" findings page through quiet hours (critical=True) — an actual
+                    # outage is exactly the kind of thing worth waking up for; a recovery
+                    # notification doesn't need to.
+                    is_down = "just went DOWN" in finding
+                    await asyncio.to_thread(
+                        _push.send_to_all, "infrastructure_down", "Jarvis: infrastructure alert",
+                        finding, tag="uptime-kuma", conversation_id=conv_id, critical=is_down,
+                    )
+            except Exception:
+                pass
 
     _save_state(new_state)
 
