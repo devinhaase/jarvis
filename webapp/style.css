@@ -127,6 +127,23 @@ html, body {
   background-size: 36px 36px, 36px 36px, 100% 100%;
 }
 
+/* ---------- System mood: Mark II (busy cyan, early/rough) vs Mark III (clean white,
+   refined) reused as an overall status language — see app.js's updateSystemMood(). Only
+   meaningful once real status has arrived (data-mood is unset until then), and only in the
+   dark HUD theme; the light theme has no "mood," same as it has no scan sweep or corners. */
+:root:not([data-theme="light"]) #app[data-mood="elevated"],
+:root[data-theme="dark"] #app[data-mood="elevated"] {
+  --accent: #22d3ee;
+  --hud-line: rgba(34, 211, 238, 0.5);
+  background-image:
+    linear-gradient(rgba(34,211,238,0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34,211,238,0.08) 1px, transparent 1px),
+    radial-gradient(ellipse at 30% 0%, rgba(34,211,238,0.16) 0%, transparent 55%);
+  background-size: 30px 30px, 30px 30px, 100% 100%;
+}
+#app[data-mood="elevated"] .hud-scan { animation-duration: 3.2s; }
+#app[data-mood="elevated"] .reactor-core { animation-duration: 1.3s; }
+
 /* ---------- Depth layers: the film leans on layered translucency + parallax to read as
    3D, more than raw brightness — this is the cheap web equivalent. Two extra fixed planes
    behind the real content, each blurrier/dimmer/coarser than the last (a depth-of-field

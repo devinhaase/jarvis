@@ -760,6 +760,24 @@ function renderIntegrationStatus(status) {
       el.classList.add("hud-flyin");
     }
   }
+  updateSystemMood();
+}
+
+// The films used color/complexity as a status language, not just decoration — Mark II
+// (early, rough) reads busy cyan, Mark III (refined) settles into clean white. Reused here
+// as an overall "system mood": the whole HUD pulls toward a busier cyan the moment
+// anything is degraded/erroring, and settles back to the calm default the moment
+// everything clears — same instinct as the per-dot color, just readable at a glance
+// without having to check each instrument individually. "disconnected" doesn't elevate the
+// mood on its own (see the integration-dot CSS comment: that's usually just "not
+// configured," not a problem).
+function updateSystemMood() {
+  const app = document.getElementById("app");
+  if (!app) return;
+  const dotIds = Object.keys(INTEGRATION_DOT_TITLE);
+  const states = dotIds.map((id) => document.getElementById(id)?.dataset.state);
+  const elevated = states.some((s) => s === "degraded" || s === "error");
+  app.dataset.mood = elevated ? "elevated" : "nominal";
 }
 
 // ---------------------------------------------------------------------------
