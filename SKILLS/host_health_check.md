@@ -1,11 +1,11 @@
 ---
 name: host_health_check
-status: proposed
+status: active
 tier: TIER_1
 team: network
 version: 1
 created_at: 1786980162.0962322
-updated_at: 1786980162.0962322
+updated_at: 1789760887.9915228
 success_count: 0
 fail_count: 0
 flagged: false

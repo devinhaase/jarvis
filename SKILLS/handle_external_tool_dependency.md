@@ -1,11 +1,11 @@
 ---
 name: Handle External Tool Dependency
-status: proposed
+status: active
 tier: TIER_1
 team: cybersecurity
 version: 1
 created_at: 1786675687.9223387
-updated_at: 1786675687.9223387
+updated_at: 1789760887.0732758
 success_count: 0
 fail_count: 0
 flagged: false

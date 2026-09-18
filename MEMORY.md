@@ -1,6 +1,6 @@
 # MEMORY.md — What Jarvis has learned
 
-_Auto-generated from data/semantic_memory.json — do not hand-edit, changes will be overwritten on the next fact/preference update. Last generated: 2026-09-18 19:43 UTC._
+_Auto-generated from data/semantic_memory.json — do not hand-edit, changes will be overwritten on the next fact/preference update. Last generated: 2026-09-18 20:22 UTC._
 
 ## Ongoing facts
 
@@ -38,6 +38,7 @@ _Auto-generated from data/semantic_memory.json — do not hand-edit, changes wil
 - goals.py tracks standing objectives (distinct from task_manager.py one-shot tasks) with scheduled check-ins that reschedule from whenever they are actually checked in on.
 - documents.py adds local document intelligence: drop a manual/receipt/warranty into data/documents/ and get cited answers via the existing embeddings.py infrastructure.
 - ACTIVE_LLM is set to "ollama" - Jarvis now runs entirely on the local Ollama instance (llama3.2 model) with no cloud LLM API key required at all.
+- Devin's OAuth tokens are expiring soon and need to be updated.
 
 ## Active projects
 

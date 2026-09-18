@@ -1,11 +1,11 @@
 ---
 name: Firewall Security Audit
-status: proposed
+status: active
 tier: TIER_1
 team: cybersecurity
 version: 1
 created_at: 1786807689.7774248
-updated_at: 1786807689.7774248
+updated_at: 1789760884.9420202
 success_count: 0
 fail_count: 0
 flagged: false

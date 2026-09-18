@@ -1,11 +1,11 @@
 ---
 name: Enhance Firewall Security
-status: proposed
+status: active
 tier: TIER_4
 team: network
 version: 1
 created_at: 1786806135.0619984
-updated_at: 1786806135.0619984
+updated_at: 1789760884.000913
 success_count: 0
 fail_count: 0
 flagged: false

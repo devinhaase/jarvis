@@ -1,11 +1,11 @@
 ---
 name: task_latency_check
-status: proposed
+status: active
 tier: TIER_1
 team: network
 version: 1
 created_at: 1789324906.3323712
-updated_at: 1789324906.3323712
+updated_at: 1789760890.0071151
 success_count: 0
 fail_count: 0
 flagged: false
