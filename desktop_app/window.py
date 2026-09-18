@@ -65,8 +65,12 @@ MIN_WIDTH, MIN_HEIGHT = 720, 480
 # updating for it to still know how to wake its own server there.
 # ---------------------------------------------------------------------------
 
-PROJECT_ROOT = r"C:\Users\devin\OneDrive\Desktop\AI Agent\jarvis"
-SERVER_PYTHON = r"C:\Users\devin\AppData\Local\hermes\hermes-agent\venv\Scripts\python.exe"
+# Updated after the OneDrive sync incident (Sept 2026) moved the live deployment to its
+# own git clone outside OneDrive, with its own dedicated venv — same reasoning
+# start_jarvis_server.bat's own comment gives for using a project-specific venv over PATH
+# resolution at boot time.
+PROJECT_ROOT = r"C:\Users\devin\dev\jarvis"
+SERVER_PYTHON = r"C:\Users\devin\dev\jarvis\.venv\Scripts\python.exe"
 SERVER_SCRIPT = "server.py"
 
 SERVER_START_TIMEOUT_S = 60   # how long to wait for a cold start before giving up
