@@ -25,6 +25,7 @@ const els = {
   pushCatFailedLogins: $("#pushCatFailedLogins"),
   pushCatBackupFailure: $("#pushCatBackupFailure"),
   pushCatInfrastructureDown: $("#pushCatInfrastructureDown"),
+  pushCatGoalCheckin: $("#pushCatGoalCheckin"),
   pushQuietEnabled: $("#pushQuietEnabled"),
   pushQuietStart: $("#pushQuietStart"),
   pushQuietEnd: $("#pushQuietEnd"),
@@ -806,6 +807,7 @@ function renderPushSettings(settings) {
   els.pushCatFailedLogins.checked = cats.failed_logins !== false;
   els.pushCatBackupFailure.checked = cats.backup_failure !== false;
   els.pushCatInfrastructureDown.checked = cats.infrastructure_down !== false;
+  els.pushCatGoalCheckin.checked = cats.goal_checkin !== false;
   const qh = settings.quiet_hours || {};
   els.pushQuietEnabled.checked = !!qh.enabled;
   els.pushQuietStart.value = qh.start || "22:00";
@@ -836,13 +838,14 @@ function _sendCategoryUpdate() {
       failed_logins: els.pushCatFailedLogins.checked,
       backup_failure: els.pushCatBackupFailure.checked,
       infrastructure_down: els.pushCatInfrastructureDown.checked,
+      goal_checkin: els.pushCatGoalCheckin.checked,
     },
   });
 }
 for (const el of [
   els.pushCatApprovals, els.pushCatAlerts, els.pushCatBriefing, els.pushCatMessages,
   els.pushCatNetworkAnomaly, els.pushCatNewDevice, els.pushCatFailedLogins, els.pushCatBackupFailure,
-  els.pushCatInfrastructureDown,
+  els.pushCatInfrastructureDown, els.pushCatGoalCheckin,
 ]) {
   el.addEventListener("change", _sendCategoryUpdate);
 }

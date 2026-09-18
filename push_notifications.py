@@ -78,11 +78,15 @@ CATEGORIES = (
     # ESXi, a load balancer...) via Uptime Kuma, not this project's own network/firewall
     # tools — a different signal source, worth toggling independently.
     "infrastructure_down",
+    # goals.py — a standing goal's scheduled check-in coming due. Separate from "briefing"
+    # since a goal check-in is its own conversation/prompt, not folded into the morning
+    # summary, and separate from "alerts" since nothing about it is a problem.
+    "goal_checkin",
 )
 DEFAULT_CATEGORIES = {
     "approvals": True, "alerts": True, "briefing": True, "messages": False,
     "network_anomaly": True, "new_device": True, "failed_logins": True, "backup_failure": True,
-    "infrastructure_down": True,
+    "infrastructure_down": True, "goal_checkin": True,
 }
 DEFAULT_QUIET_HOURS = {"enabled": False, "start": "22:00", "end": "07:00"}
 

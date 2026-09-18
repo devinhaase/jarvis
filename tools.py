@@ -165,6 +165,35 @@ except Exception:
     pass  # Task manager unavailable — Jarvis continues without it
 
 try:
+    from goals import add_goal, list_goals, check_in_goal, resolve_goal, delete_goal
+
+    assistant_tools["add_goal"] = Tool(
+        "add_goal",
+        "Add a standing goal (not a one-shot task) that Jarvis periodically asks about "
+        "for a status update, e.g. 'keep an eye on Twingate reconnect stability' — title, "
+        "optional details, optional check_in_interval_days (default 7)",
+        Tier.TIER_2, add_goal, team="personal_assistant",
+    )
+    assistant_tools["list_goals"] = Tool(
+        "list_goals", "List goals, soonest-check-in first — active goals by default, "
+        "pass include_resolved=true for achieved/abandoned ones too",
+        Tier.TIER_1, list_goals, team="personal_assistant",
+    )
+    assistant_tools["check_in_goal"] = Tool(
+        "check_in_goal", "Log a progress note against a goal by its id and reschedule its "
+        "next check-in from now",
+        Tier.TIER_2, check_in_goal, team="personal_assistant",
+    )
+    assistant_tools["resolve_goal"] = Tool(
+        "resolve_goal", "Mark a goal 'achieved' or 'abandoned' by its id — stops it from "
+        "being surfaced again",
+        Tier.TIER_2, resolve_goal, team="personal_assistant",
+    )
+    assistant_tools["delete_goal"] = Tool("delete_goal", "Delete a goal by its id", Tier.TIER_2, delete_goal, team="personal_assistant")
+except Exception:
+    pass  # Goals module unavailable — Jarvis continues without it
+
+try:
     from conversation_store import semantic_search_conversations
 
     assistant_tools["semantic_search_conversations"] = Tool(
