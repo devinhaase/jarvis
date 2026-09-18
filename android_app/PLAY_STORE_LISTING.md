@@ -60,10 +60,16 @@ features specifically (both are opt-in permissions at the OS level, but the Data
 form asks about the feature as designed, not per-user opt-out) — answer "required for app
 functionality," not "optional," for audio and the FCM token.
 
-**Encryption in transit:** Yes for the VPN address (`https://ai.dhaaselab.com`, real TLS
-cert). The local/LAN address is plain HTTP by design (see `android_app/README.md`'s scope
-boundary on why) — answer honestly that not all network traffic is encrypted, since the
-local path genuinely isn't.
+**Encryption in transit:** Yes for both paths now (updated Sept 2026 — this used to be
+plain HTTP on the local/LAN address, see git history for that era's wording). The VPN
+address (`https://ai.dhaaselab.com`) uses a real publicly-trusted cert as before. The
+local/LAN address now also uses HTTPS via a locally-issued cert (mkcert) trusted on-device
+— see `REMOTE_ACCESS.md`'s "Local HTTPS on the LAN" section. `ConnectionManager.kt` tries
+the local HTTPS address first, falling back to plain HTTP only if that cert isn't trusted
+on this particular device yet (e.g. a fresh install before the one-time CA-trust step) —
+so answer "yes, encrypted" here, but it's still worth noting in the form's free-text if it
+allows nuance that the very first run on an unconfigured device could briefly fall back to
+HTTP until the on-device setup step is done.
 
 **Data deletion request mechanism:** Not applicable in the form's usual sense (no account
 system, no server-side data retention Devin doesn't already fully control) — the contact
