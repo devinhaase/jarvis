@@ -194,6 +194,24 @@ except Exception:
     pass  # Goals module unavailable — Jarvis continues without it
 
 try:
+    from documents import search_documents, list_documents
+
+    assistant_tools["search_documents"] = Tool(
+        "search_documents",
+        "Search manuals/receipts/warranties dropped into data/documents/ — returns the "
+        "most relevant excerpts with which file they came from, so an answer can cite its "
+        "source. query, optional top_k (default 5)",
+        Tier.TIER_1, search_documents, team="personal_assistant",
+    )
+    assistant_tools["list_documents"] = Tool(
+        "list_documents", "List what's currently in the local document library, without "
+        "searching it",
+        Tier.TIER_1, list_documents, team="personal_assistant",
+    )
+except Exception:
+    pass  # Document intelligence unavailable — Jarvis continues without it
+
+try:
     from conversation_store import semantic_search_conversations
 
     assistant_tools["semantic_search_conversations"] = Tool(
